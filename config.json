@@ -1,0 +1,24 @@
+{
+  "bls": {
+    "enabled": true,
+    "country": "Spain",
+    "applicationCountry": "Nigeria",
+    "city": "Lagos",
+    "centre": "Lagos",
+    "visaType": "Short Stay",
+    "visaSubCategory": "Tourist",
+    "applicantType": "Individual",
+    "memberCount": 1,
+    "preferredDateFrom": "",
+    "preferredDateTo": "",
+    "preferredTimeFrom": "",
+    "preferredTimeTo": "",
+    "intervalMinSeconds": 180,
+    "intervalMaxSeconds": 360
+  },
+  "notifications": {
+    "telegram": true,
+    "desktop": true,
+    "sound": true
+  }
+}

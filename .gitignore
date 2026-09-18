@@ -1,0 +1,23 @@
+# Secrets. Never commit.
+.env
+.env.local
+
+# Runtime data: browser profile with your BLS session, screenshots of your
+# account, logs and monitor state.
+data/sessions/
+data/screenshots/
+data/logs/
+data/state/
+
+# Build output and installers (the .dmg is ~108 MB).
+node_modules/
+dist/
+release/
+*.dmg
+*.zip
+*.blockmap
+
+# Misc
+*.log
+.DS_Store
+coverage/

@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><title>Appointment Booking - BLS Spain Visa Nigeria</title></head>
+<body>
+  <nav><a href="/Global/blsappointment/MyAppointments">My Appointments</a>
+    <a href="/Global/account/logout" onclick="OnLogoutSubmit();">Logout</a></nav>
+  <h1>Book Appointment</h1>
+  <form>
+    <label for="location">Location</label>
+    <select id="location" name="LocationId"><option value="">Select</option><option value="1" selected>Lagos</option></select>
+    <label for="visaType">Visa Category</label>
+    <select id="visaType" name="VisaCategoryId"><option value="10" selected>Tourist</option><option value="11">Business</option></select>
+  </form>
+  <div class="alert alert-info">
+    No appointment slots are currently available for the selected category. Please try again after some time.
+  </div>
+</body></html>

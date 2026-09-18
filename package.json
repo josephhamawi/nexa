@@ -1,0 +1,117 @@
+{
+  "name": "bls-spain-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Availability monitor for BLS Spain visa appointments \u2014 Lagos, Nigeria only. Notifies on availability; booking stays manual.",
+  "author": {
+    "name": "Rami Zoohbi",
+    "email": "rami.zoohbi@gmail.com"
+  },
+  "license": "UNLICENSED",
+  "main": "dist/main/main.js",
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-ui.mjs",
+    "dev": "npm run build && electron dist/main/main.js",
+    "start": "electron dist/main/main.js",
+    "login": "tsx src/cli/login.ts",
+    "monitor": "tsx src/cli/monitor.ts",
+    "check": "tsx src/cli/check.ts",
+    "diagnostics": "tsx src/cli/diagnostics.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:telegram": "tsx src/cli/testTelegram.ts",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "postinstall": "playwright install chromium",
+    "icon": "node scripts/make-icon.mjs",
+    "package": "npm run build && electron-builder --mac --publish never",
+    "package:dir": "npm run build && electron-builder --mac --dir --publish never"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "playwright": "^1.50.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^22.13.5",
+    "@typescript-eslint/eslint-plugin": "^8.25.0",
+    "@typescript-eslint/parser": "^8.25.0",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8",
+    "eslint": "^9.21.0",
+    "jsdom": "^29.1.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
+  },
+  "build": {
+    "appId": "com.ramizoohbi.blsspainlagos",
+    "productName": "BLS Spain Lagos Monitor",
+    "copyright": "Availability monitor. Booking is always completed manually by the user.",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "config.json",
+        "to": "config.json"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/playwright/**",
+      "node_modules/playwright-core/**"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.utilities",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "darkModeSupport": true,
+      "extendInfo": {
+        "LSUIElement": false,
+        "NSHighResolutionCapable": true
+      }
+    },
+    "dmg": {
+      "title": "BLS Spain Lagos Monitor"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "build/icon.png",
+      "category": "Utility"
+    }
+  }
+}

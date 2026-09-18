@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self';"
+    />
+    <title>BLS Spain Appointment Monitor, Lagos</title>
+    <link rel="stylesheet" href="assets/fonts.css" />
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <div class="paper">
+      <!-- ── Masthead ─────────────────────────────────────────────────── -->
+      <header class="masthead">
+        <div class="seal" aria-hidden="true">
+          <span class="seal-bar"></span><span class="seal-bar gold"></span><span class="seal-bar"></span>
+        </div>
+
+        <div class="masthead-text">
+          <p class="eyebrow">Appointment availability monitor</p>
+          <h1>Spain <span class="thin">·</span> Lagos</h1>
+          <p class="subtitle">
+            BLS International, Nigeria <span class="dotsep"></span>
+            <em id="visa-type">-</em> <span class="dotsep"></span>
+            <span id="applicant-summary">-</span>
+          </p>
+        </div>
+
+        <div class="masthead-side">
+          <div class="theme-switch" role="group" aria-label="Colour theme">
+            <button data-theme-choice="light" aria-label="Light theme" title="Light">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><g class="rays"><path d="M12 2.4v2.6M12 19v2.6M4.2 12H1.6M22.4 12h-2.6M6.1 6.1 4.3 4.3M19.7 19.7l-1.8-1.8M17.9 6.1l1.8-1.8M4.3 19.7l1.8-1.8"/></g></svg>
+            </button>
+            <button data-theme-choice="dark" aria-label="Dark theme" title="Dark">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.3 14.2A8.6 8.6 0 0 1 9.8 3.7a8.6 8.6 0 1 0 10.5 10.5Z"/></svg>
+            </button>
+            <button data-theme-choice="system" aria-label="Follow system theme" title="System">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.8" y="4.3" width="18.4" height="12.4" rx="1.6"/><path d="M8.6 20.2h6.8"/></svg>
+            </button>
+          </div>
+          <p class="stamp" id="clock">-</p>
+        </div>
+      </header>
+
+      <!-- ── Takeover banner: appointment found / manual action ───────── -->
+      <section id="alert-panel" class="alert hidden" aria-live="assertive">
+        <div class="alert-rule"></div>
+        <div class="alert-head">
+          <h2 id="alert-title">Appointment available</h2>
+          <span class="alert-badge" id="alert-badge">Monitoring stopped</span>
+        </div>
+
+        <dl class="alert-details">
+          <div><dt>Centre</dt><dd>Lagos, Nigeria</dd></div>
+          <div><dt>Visa</dt><dd id="alert-visa">-</dd></div>
+          <div><dt>Date</dt><dd id="alert-date" class="figure">-</dd></div>
+          <div><dt>Time</dt><dd id="alert-time" class="figure">-</dd></div>
+          <div><dt>Detected</dt><dd id="alert-detected" class="figure">-</dd></div>
+        </dl>
+
+        <p id="alert-more" class="alert-more hidden"></p>
+        <p class="alert-note" id="alert-note"></p>
+
+        <div class="actions">
+          <button id="alert-open-browser" class="btn btn-solid">Open browser</button>
+          <button id="alert-resume" class="btn hidden">Resume monitoring</button>
+          <button id="alert-view-screenshot" class="btn btn-quiet">View screenshot</button>
+        </div>
+      </section>
+
+      <!-- ── Status board ─────────────────────────────────────────────── -->
+      <section class="board">
+        <div class="board-status">
+          <p class="label">Status</p>
+          <p class="status-readout">
+            <span id="status-dot" class="dot idle" aria-hidden="true"></span>
+            <span id="status-label">Stopped</span>
+          </p>
+          <p id="availability-message" class="availability">No appointment currently detected</p>
+          <p id="backoff-note" class="footnote"></p>
+        </div>
+
+        <div class="board-timing">
+          <div class="timing-row">
+            <p class="label">Last check</p>
+            <p id="last-check" class="figure lg">-</p>
+            <p id="last-check-date" class="footnote">-</p>
+          </div>
+          <div class="timing-row">
+            <p class="label">Next check</p>
+            <p id="next-check" class="figure lg">-</p>
+            <p id="next-check-in" class="footnote">-</p>
+          </div>
+          <div class="timing-row">
+            <p class="label">Interval</p>
+            <p id="interval" class="figure lg">-</p>
+            <p class="footnote">randomised</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Controls ─────────────────────────────────────────────────── -->
+      <section class="controls">
+        <button id="btn-check-now" class="btn btn-solid">Check now</button>
+        <button id="btn-toggle" class="btn">Start</button>
+        <button id="btn-sign-in" class="btn">Sign in to BLS</button>
+        <button id="btn-open-browser" class="btn btn-quiet">Open browser</button>
+        <button id="btn-screenshots" class="btn btn-quiet">Screenshots</button>
+        <span id="toast" class="toast" role="status"></span>
+      </section>
+
+      <!-- ── Ledger ───────────────────────────────────────────────────── -->
+      <div class="ledger">
+        <section class="card">
+          <h3>Register</h3>
+          <ul class="rows">
+            <li><span>Checks today</span><strong id="stat-checks" class="figure">0</strong></li>
+            <li><span>Appointments detected</span><strong id="stat-found" class="figure">0</strong></li>
+            <li><span>Errors today</span><strong id="stat-errors" class="figure">0</strong></li>
+          </ul>
+        </section>
+
+        <section class="card">
+          <h3>Session</h3>
+          <ul class="rows">
+            <li><span>BLS account</span><strong id="session-status" class="tag neutral">Unknown</strong></li>
+            <li><span>Chromium</span><strong id="browser-status" class="tag neutral">Closed</strong></li>
+          </ul>
+          <p class="note">
+            Press <em>Sign in to BLS</em> and complete the login and verification in the browser
+            yourself. The session then persists between restarts, and monitoring resumes on its own
+            once you are through. Your password is never typed, stored or read by this application.
+          </p>
+        </section>
+
+        <section class="card">
+          <h3>Notifications</h3>
+          <ul class="rows">
+            <li><span>Telegram</span><strong id="ch-telegram" class="tag neutral">-</strong></li>
+            <li><span>Desktop</span><strong id="ch-desktop" class="tag neutral">-</strong></li>
+            <li><span>Sound</span><strong id="ch-sound" class="tag neutral">-</strong></li>
+          </ul>
+          <div class="card-actions">
+            <button id="test-notifications" class="btn btn-quiet btn-sm">Send test</button>
+            <button id="telegram-setup" class="btn btn-quiet btn-sm">Set up Telegram</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3>Window watched</h3>
+          <ul class="rows">
+            <li><span>Date from</span><strong id="pref-date-from" class="figure">any</strong></li>
+            <li><span>Date to</span><strong id="pref-date-to" class="figure">any</strong></li>
+            <li><span>Time from</span><strong id="pref-time-from" class="figure">any</strong></li>
+            <li><span>Time to</span><strong id="pref-time-to" class="figure">any</strong></li>
+          </ul>
+          <p class="note">Set these in <em>Application details</em> below.</p>
+        </section>
+      </div>
+
+      <!-- ── Application details (editable) ───────────────────────────── -->
+      <section class="card settings">
+        <div class="settings-head">
+          <h3>Application details</h3>
+          <div class="settings-aside">
+            <p class="note settings-hint">
+              What the monitor selects on the BLS form, and which slots count as a match.
+            </p>
+            <button type="button" id="refresh-options" class="btn btn-quiet btn-sm">
+              Load lists from BLS
+            </button>
+          </div>
+        </div>
+        <p id="options-source" class="note options-source">
+          Choices below are the published BLS categories. Sign in, then press
+          <em>Load lists from BLS</em> to replace them with exactly what your account is offered.
+        </p>
+
+        <!-- novalidate: the Zod schema in the main process is the single source of
+             truth, so its message is what you see instead of a silent browser block. -->
+        <form id="settings-form" class="form-grid" autocomplete="off" novalidate>
+          <label class="field">
+            <span>Visa type</span>
+            <select id="f-visa-type" name="visaType"></select>
+            <input id="f-visa-type-custom" class="custom-input hidden" type="text"
+                   placeholder="Type it exactly as BLS words it" />
+            <small id="f-visa-type-hint">Pick Custom if BLS words it differently.</small>
+          </label>
+
+          <label class="field">
+            <span>Category</span>
+            <select id="f-visa-subcategory" name="visaSubCategory"></select>
+            <input id="f-visa-subcategory-custom" class="custom-input hidden" type="text"
+                   placeholder="Type it exactly as BLS words it" />
+            <small>The form's second dropdown. Choose None if it only asks once.</small>
+          </label>
+
+          <label class="field">
+            <span>Appointment for</span>
+            <select id="f-applicant-type" name="applicantType">
+              <option value="Individual">Individual</option>
+              <option value="Family">Family</option>
+              <option value="Group">Group</option>
+            </select>
+            <small>Family and Group are scheduled separately by BLS.</small>
+          </label>
+
+          <label class="field">
+            <span>Applicants</span>
+            <input id="f-member-count" name="memberCount" type="number" min="1" max="20" step="1" />
+            <small>Number of members on the booking.</small>
+          </label>
+
+          <label class="field">
+            <span>Date from</span>
+            <input id="f-date-from" name="preferredDateFrom" type="date" />
+            <small>Blank = any date.</small>
+          </label>
+
+          <label class="field">
+            <span>Date to</span>
+            <input id="f-date-to" name="preferredDateTo" type="date" />
+            <small>Blank = any date.</small>
+          </label>
+
+          <label class="field">
+            <span>Time from</span>
+            <input id="f-time-from" name="preferredTimeFrom" type="time" />
+            <small>Blank = any time.</small>
+          </label>
+
+          <label class="field">
+            <span>Time to</span>
+            <input id="f-time-to" name="preferredTimeTo" type="time" />
+            <small>Blank = any time.</small>
+          </label>
+
+          <label class="field">
+            <span>Interval min</span>
+            <input id="f-interval-min" name="intervalMinSeconds" type="number" min="180" max="7200" step="30" />
+            <small>Seconds. 180 is the floor.</small>
+          </label>
+
+          <label class="field">
+            <span>Interval max</span>
+            <input id="f-interval-max" name="intervalMaxSeconds" type="number" min="180" max="7200" step="30" />
+            <small>Each wait is drawn at random from this range.</small>
+          </label>
+
+          <fieldset class="field field-wide">
+            <span>Notifications</span>
+            <div class="checks">
+              <label><input id="f-telegram" type="checkbox" /> Telegram</label>
+              <label><input id="f-desktop" type="checkbox" /> Desktop</label>
+              <label><input id="f-sound" type="checkbox" /> Sound</label>
+            </div>
+            <small>Alerts fire on availability, CAPTCHA, login and errors needing you.</small>
+          </fieldset>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-solid btn-sm">Save details</button>
+            <button type="button" id="settings-revert" class="btn btn-quiet btn-sm">Revert</button>
+            <span id="settings-status" class="form-status" role="status"></span>
+          </div>
+        </form>
+      </section>
+
+      <!-- Telegram setup -->
+      <section id="telegram-panel" class="card telegram-panel hidden">
+        <h3>Telegram setup</h3>
+        <ol class="steps">
+          <li>Open Telegram and message <strong>@BotFather</strong>. Send <code>/newbot</code>,
+            choose a name, and copy the token it gives you.</li>
+          <li>Message <strong>@userinfobot</strong>. It replies with your numeric chat ID.</li>
+          <li>Send your own new bot any message once, so it is allowed to write to you.</li>
+          <li>Paste both below and save.</li>
+        </ol>
+
+        <div class="form-grid">
+          <label class="field field-wide">
+            <span>Bot token</span>
+            <input id="f-bot-token" type="password" autocomplete="off" spellcheck="false"
+                   placeholder="123456789:AAE..." />
+            <small id="token-state">Stored in your .env file, never shown again and never logged.</small>
+          </label>
+
+          <label class="field">
+            <span>Chat ID</span>
+            <input id="f-chat-id" type="text" autocomplete="off" inputmode="numeric"
+                   placeholder="987654321" />
+            <small>Numbers only. Group chats start with a minus sign.</small>
+          </label>
+
+          <div class="form-actions">
+            <button type="button" id="telegram-save" class="btn btn-solid btn-sm">Save and verify</button>
+            <button type="button" id="telegram-test" class="btn btn-quiet btn-sm">Send test message</button>
+            <button type="button" id="telegram-close" class="btn btn-quiet btn-sm">Close</button>
+            <span id="telegram-status" class="form-status" role="status"></span>
+          </div>
+        </div>
+
+        <p class="note">
+          These are credentials for a bot you own, which is why the application can hold them.
+          Your BLS password is different and is never entered here.
+        </p>
+      </section>
+
+      <!-- ── Event log ────────────────────────────────────────────────── -->
+      <section class="card log">
+        <h3>Event log</h3>
+        <ol id="event-log" class="event-log"></ol>
+        <p id="log-empty" class="note">Nothing yet. Press <em>Start</em> to begin watching.</p>
+      </section>
+
+      <footer class="colophon">
+        <span class="rule"></span>
+        Availability monitor only. It never solves CAPTCHAs, never enters credentials, never pays,
+        and never completes a booking. You do that yourself, in the browser.
+      </footer>
+    </div>
+
+    <script src="assets/renderer.js"></script>
+  </body>
+</html>

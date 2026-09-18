@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import { ensureDataDirs, paths } from '../config/config';
 import { childLogger } from '../logging/logger';
@@ -17,10 +18,29 @@ const log = childLogger('browser');
  * logged in between runs, Playwright stores BLS's own cookies there, and
  * nothing is copied out of it.
  */
+/**
+ * Raised when a second process tries to drive the same persistent profile.
+ *
+ * Two Chromiums sharing one profile directory fight over the cookie store, and
+ * the loser silently loses its BLS session: you sign in, and moments later the
+ * portal has signed you out again. The lock below makes that impossible.
+ */
+export class ProfileInUseError extends Error {
+  constructor(pid: number) {
+    super(
+      `The browser profile is already in use by process ${pid}. ` +
+        'Quit the running monitor (or CLI command) before starting another one; ' +
+        'two Chromiums on one profile would log each other out of BLS.',
+    );
+    this.name = 'ProfileInUseError';
+  }
+}
+
 export class BrowserManager {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
   private launching: Promise<BrowserContext> | null = null;
+  private holdsLock = false;
 
   constructor(private readonly headless = false) {}
 
@@ -34,6 +54,7 @@ export class BrowserManager {
 
     this.launching = (async () => {
       ensureDataDirs();
+      this.acquireProfileLock();
       log.info({ profile: paths.session, headless: this.headless }, 'launching persistent Chromium');
 
       const context = await chromium.launchPersistentContext(paths.session, {
@@ -68,6 +89,7 @@ export class BrowserManager {
         log.warn('browser context closed');
         this.context = null;
         this.page = null;
+        this.releaseProfileLock();
       });
 
       this.context = context;
@@ -117,6 +139,7 @@ export class BrowserManager {
     const context = this.context;
     this.context = null;
     this.page = null;
+    this.releaseProfileLock();
     if (!context) return;
     try {
       await context.close();
@@ -126,7 +149,53 @@ export class BrowserManager {
     }
   }
 
+  private lockFile(): string {
+    return path.join(paths.session, '.monitor-lock');
+  }
+
+  /** Refuses to launch when another live process owns the profile. */
+  private acquireProfileLock(): void {
+    const file = this.lockFile();
+    try {
+      if (fs.existsSync(file)) {
+        const pid = Number(fs.readFileSync(file, 'utf8').trim());
+        if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && isProcessAlive(pid)) {
+          throw new ProfileInUseError(pid);
+        }
+        // Stale lock from a crash: reclaim it.
+        fs.rmSync(file, { force: true });
+      }
+      fs.writeFileSync(file, String(process.pid), 'utf8');
+      this.holdsLock = true;
+    } catch (err) {
+      if (err instanceof ProfileInUseError) throw err;
+      log.warn({ err: (err as Error).message }, 'could not write the profile lock');
+    }
+  }
+
+  private releaseProfileLock(): void {
+    if (!this.holdsLock) return;
+    this.holdsLock = false;
+    try {
+      const file = this.lockFile();
+      if (fs.existsSync(file) && fs.readFileSync(file, 'utf8').trim() === String(process.pid)) {
+        fs.rmSync(file, { force: true });
+      }
+    } catch {
+      // A leftover lock is reclaimed on the next launch anyway.
+    }
+  }
+
   static profileExists(): boolean {
     return fs.existsSync(paths.session) && fs.readdirSync(paths.session).length > 0;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
 }

@@ -1092,6 +1092,7 @@ export class BlsSpainAdapter {
       // its 30s timeout on a blank frame. The login page itself is captured by
       // evaluateGates, which does have something to show.
       log.warn({ code: error.code }, 'login required (redirected to the login route)');
+      await this.parkOnLoginPage(page);
       return buildResult({
         visaType: this.config.visaType,
         status: AvailabilityStatus.LOGIN_REQUIRED,
@@ -1141,6 +1142,28 @@ export class BlsSpainAdapter {
       errorCode: error.code,
       url: error.evidence.url ?? null,
     });
+  }
+
+  /**
+   * Leaves the browser somewhere the user can actually act.
+   *
+   * BLS answers an expired session with a 302 to a PLAIN-HTTP login URL whose
+   * port does not respond, so Chromium ends up on ERR_CONNECTION_TIMED_OUT with
+   * no way to sign in. Replacing that with the real https login page turns a
+   * dead end into the form you need.
+   *
+   * This is the one place that navigates to the login route deliberately, and
+   * it is safe precisely because we only get here after proving the session is
+   * already gone: there is no live session left to end.
+   */
+  private async parkOnLoginPage(page: Page | null): Promise<void> {
+    if (!page || page.isClosed()) return;
+    try {
+      await page.goto(BLS_URLS.login, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+      log.info('browser parked on the login page for manual sign-in');
+    } catch (err) {
+      log.warn({ err: (err as Error).message }, 'could not open the login page');
+    }
   }
 
   private userMessageFor(error: BlsError): string {

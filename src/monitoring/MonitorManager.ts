@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { BrowserManager } from '../browser/BrowserManager';
+import { BrowserManager, ProfileInUseError } from '../browser/BrowserManager';
 import { SessionManager } from '../browser/SessionManager';
 import { BlsSpainAdapter } from '../bls/BlsSpainAdapter';
 import { BLS_URLS } from '../bls/BlsSelectors';
@@ -144,7 +144,7 @@ export class MonitorManager extends EventEmitter {
     });
     this.log('Monitoring started', 'info');
 
-    await this.browser.launch();
+    if (!(await this.launchBrowser())) return;
     void this.runCheck('scheduled');
   }
 
@@ -170,7 +170,7 @@ export class MonitorManager extends EventEmitter {
       manualActionReason: null,
     });
     this.log('Monitoring resumed', 'info');
-    await this.browser.launch();
+    if (!(await this.launchBrowser())) return;
     void this.runCheck('scheduled');
   }
 
@@ -216,7 +216,7 @@ export class MonitorManager extends EventEmitter {
 
   /** Opens (or focuses) Chromium on the BLS portal for manual takeover. */
   async openBrowser(): Promise<void> {
-    await this.browser.launch();
+    if (!(await this.launchBrowser())) return;
     const page = await this.browser.getPage();
     if (page.url() === 'about:blank') {
       // Never the login route here: opening it would end a live session.
@@ -232,7 +232,7 @@ export class MonitorManager extends EventEmitter {
    * only navigates and raises the window.
    */
   async openLoginPage(): Promise<void> {
-    await this.browser.launch();
+    if (!(await this.launchBrowser())) return;
     const page = await this.browser.getPage();
     await page
       .goto(BLS_URLS.login, { waitUntil: 'domcontentloaded', timeout: 60_000 })
@@ -306,6 +306,32 @@ export class MonitorManager extends EventEmitter {
       'success',
     );
     return { ok: true, options: this.formOptions() };
+  }
+
+  /**
+   * Launches Chromium, turning a profile clash into a visible, explained pause
+   * rather than an unhandled rejection. Two processes on one profile would log
+   * each other out of BLS, so we stop instead.
+   */
+  private async launchBrowser(): Promise<boolean> {
+    try {
+      await this.browser.launch();
+      return true;
+    } catch (err) {
+      const message = (err as Error).message;
+      const clash = err instanceof ProfileInUseError;
+      this.scheduler.cancel();
+      this.patch({
+        runState: 'PAUSED',
+        currentStatus: AvailabilityStatus.ERROR,
+        nextCheck: null,
+        manualActionRequired: true,
+        manualActionReason: message,
+      });
+      this.log(clash ? message : `Could not start the browser: ${message}`, 'error');
+      log.error({ err: message }, 'browser launch failed');
+      return false;
+    }
   }
 
   private optionsFile(): string {
@@ -432,7 +458,16 @@ export class MonitorManager extends EventEmitter {
           : this.session.getStatus(),
     });
 
-    this.log(`${describeStatus(result.status)}. Monitoring paused.`, 'warn');
+    const needsLogin =
+      result.status === AvailabilityStatus.LOGIN_REQUIRED ||
+      result.status === AvailabilityStatus.SESSION_EXPIRED;
+
+    this.log(
+      needsLogin
+        ? 'Session expired. The browser is on the login page, sign in there.'
+        : `${describeStatus(result.status)}. Monitoring paused.`,
+      'warn',
+    );
     await this.browser.bringToFront();
 
     const outcome = await this.notifications.manualActionRequired(result);

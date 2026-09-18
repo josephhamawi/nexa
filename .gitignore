@@ -2,6 +2,10 @@
 .env
 .env.local
 
+# Your own settings: visa type, category, applicant count, date window.
+# config.example.json is the template that ships instead.
+config.json
+
 # Runtime data: browser profile with your BLS session, screenshots of your
 # account, logs and monitor state.
 data/sessions/

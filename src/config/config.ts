@@ -41,6 +41,10 @@ export const paths = {
       ? path.resolve(process.env.BLS_CONFIG_PATH)
       : path.join(PROJECT_ROOT, 'config.json');
   },
+  /** Template shipped in the repository. config.json itself is gitignored. */
+  get configExample(): string {
+    return path.join(PROJECT_ROOT, 'config.example.json');
+  },
   get env(): string {
     return process.env.BLS_ENV_PATH
       ? path.resolve(process.env.BLS_ENV_PATH)
@@ -92,6 +96,17 @@ let cachedConfig: AppConfig | null = null;
 
 export function loadConfig(force = false): AppConfig {
   if (cachedConfig && !force) return cachedConfig;
+
+  // A fresh clone has no config.json (it holds your own visa details and is
+  // gitignored), so seed it from the template on first run.
+  if (!fs.existsSync(paths.config) && fs.existsSync(paths.configExample)) {
+    try {
+      fs.copyFileSync(paths.configExample, paths.config);
+    } catch {
+      // Not fatal: every field in the schema has a default.
+    }
+  }
+
   let raw: unknown = {};
   if (fs.existsSync(paths.config)) {
     const text = fs.readFileSync(paths.config, 'utf8');

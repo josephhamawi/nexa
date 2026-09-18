@@ -65,7 +65,7 @@
     ],
     "extraResources": [
       {
-        "from": "config.json",
+        "from": "config.example.json",
         "to": "config.json"
       }
     ],

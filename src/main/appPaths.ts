@@ -21,6 +21,7 @@ if (app.isPackaged) {
   fs.mkdirSync(dataDir, { recursive: true });
 
   if (!fs.existsSync(configFile)) {
+    // Shipped from config.example.json by electron-builder.
     const bundled = path.join(process.resourcesPath, 'config.json');
     try {
       if (fs.existsSync(bundled)) fs.copyFileSync(bundled, configFile);

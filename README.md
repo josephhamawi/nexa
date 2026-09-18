@@ -107,6 +107,13 @@ npm install          # also runs "playwright install chromium"
 cp .env.example .env
 ```
 
+`config.json` is created for you from `config.example.json` on first run. Copy
+it yourself if you would rather edit it before starting:
+
+```bash
+cp config.example.json config.json
+```
+
 If the Chromium download was skipped:
 
 ```bash
@@ -196,6 +203,11 @@ For a packaged build the file lives at
 ---
 
 ## Configuration
+
+`config.json` holds your own application details and is **gitignored**. The
+repository ships `config.example.json` instead; the first run copies it into
+place, so a fresh clone starts with working defaults and your visa type, date
+window and applicant count never leave your machine.
 
 `config.json`:
 

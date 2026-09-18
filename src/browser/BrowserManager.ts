@@ -41,6 +41,11 @@ export class BrowserManager {
   private page: Page | null = null;
   private launching: Promise<BrowserContext> | null = null;
   private holdsLock = false;
+  /** Depth counter: >0 means the navigation happening now is ours, not yours. */
+  private ownedNavigations = 0;
+  /** Epoch ms of the last thing that looked like a human driving the browser. */
+  private lastUserActivityAt: number | null = null;
+  private watchedPages = new WeakSet<Page>();
 
   constructor(private readonly headless = false) {}
 
@@ -85,6 +90,12 @@ export class BrowserManager {
         }
       });
 
+      // A tab you opened yourself counts as you using the browser.
+      context.on('page', (page) => {
+        this.noteUserActivity('new tab opened');
+        this.watchPage(page);
+      });
+
       context.on('close', () => {
         log.warn('browser context closed');
         this.context = null;
@@ -110,6 +121,7 @@ export class BrowserManager {
 
     const existing = context.pages().find((p) => !p.isClosed());
     const page = existing ?? (await context.newPage());
+    this.watchPage(page);
 
     // A freshly launched context may still be committing its initial
     // about:blank navigation. Navigating on top of that races and fails with
@@ -147,6 +159,71 @@ export class BrowserManager {
     } catch (err) {
       log.warn({ err: (err as Error).message }, 'error closing browser');
     }
+  }
+
+  /**
+   * Flags anything that looks like a person at the keyboard.
+   *
+   * Two signals, both on the page the monitor uses:
+   *   - a main-frame navigation that we did not start
+   *   - a POST we did not start, which is how BLS's "Verify Selection" and its
+   *     booking steps submit
+   *
+   * Without this the monitor would navigate away from a form you were filling
+   * in, throwing away the verification you had just solved.
+   */
+  private watchPage(page: Page): void {
+    if (this.watchedPages.has(page)) return;
+    this.watchedPages.add(page);
+
+    page.on('framenavigated', (frame) => {
+      if (frame !== page.mainFrame()) return;
+      if (this.ownedNavigations > 0) return;
+      this.noteUserActivity('navigation');
+    });
+
+    page.on('request', (request) => {
+      if (this.ownedNavigations > 0) return;
+      if (request.method() !== 'POST') return;
+      this.noteUserActivity('form submission');
+    });
+  }
+
+  private noteUserActivity(reason: string): void {
+    const previously = this.lastUserActivityAt;
+    this.lastUserActivityAt = Date.now();
+    if (!previously || Date.now() - previously > 60_000) {
+      log.info({ reason }, 'browser is being used by hand; checks will wait');
+    }
+  }
+
+  /** Marks a block of work as the monitor's own, so it is not mistaken for you. */
+  async runOwned<T>(fn: () => Promise<T>): Promise<T> {
+    this.ownedNavigations += 1;
+    try {
+      return await fn();
+    } finally {
+      // Redirects and sub-requests land shortly after the call resolves, so the
+      // guard is held open a moment longer.
+      setTimeout(() => {
+        this.ownedNavigations = Math.max(0, this.ownedNavigations - 1);
+      }, 2000);
+    }
+  }
+
+  /** True when a human touched the browser within the given window. */
+  userActiveWithin(ms: number): boolean {
+    if (this.lastUserActivityAt === null) return false;
+    return Date.now() - this.lastUserActivityAt < ms;
+  }
+
+  get lastUserActivity(): number | null {
+    return this.lastUserActivityAt;
+  }
+
+  /** Called when the user hands control back, e.g. by pressing Resume. */
+  clearUserActivity(): void {
+    this.lastUserActivityAt = null;
   }
 
   private lockFile(): string {

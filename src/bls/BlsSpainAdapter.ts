@@ -87,6 +87,12 @@ export class BlsSpainAdapter {
    * "no appointments available".
    */
   async check(signal?: AbortSignal): Promise<AvailabilityResult> {
+    // Everything below is the monitor acting, so it must not be mistaken for
+    // you using the browser.
+    return this.browser.runOwned(() => this.runCheck(signal));
+  }
+
+  private async runCheck(signal?: AbortSignal): Promise<AvailabilityResult> {
     const page = await this.browser.getPage();
     this.trackLoginRedirects(page);
     this.loginRedirectSeen = false;
@@ -813,6 +819,12 @@ export class BlsSpainAdapter {
    * one it reports why and the UI falls back to the seeded lists.
    */
   async discoverFormOptions(): Promise<
+    { ok: true; options: BlsFormOptions } | { ok: false; reason: string; status: AvailabilityStatus }
+  > {
+    return this.browser.runOwned(() => this.runDiscoverFormOptions());
+  }
+
+  private async runDiscoverFormOptions(): Promise<
     { ok: true; options: BlsFormOptions } | { ok: false; reason: string; status: AvailabilityStatus }
   > {
     const page = await this.browser.getPage();

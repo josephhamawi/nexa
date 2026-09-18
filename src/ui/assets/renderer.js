@@ -152,7 +152,8 @@ function render(state) {
   else if (state.sessionStatus === 'LOGIN_REQUIRED') setTag($('session-status'), 'Login required', 'warn');
   else setTag($('session-status'), 'Unknown', 'neutral');
 
-  setTag($('browser-status'), state.browserOpen ? 'Open' : 'Closed', state.browserOpen ? 'ok' : 'neutral');
+  if (state.browserInUse) setTag($('browser-status'), 'In use by you', 'warn');
+  else setTag($('browser-status'), state.browserOpen ? 'Open' : 'Closed', state.browserOpen ? 'ok' : 'neutral');
 
   const telegram = state.notifications.telegram;
   setTag(

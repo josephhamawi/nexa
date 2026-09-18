@@ -38,6 +38,14 @@ import { childLogger } from '../logging/logger';
 
 const log = childLogger('monitor');
 
+/**
+ * How long the monitor keeps its hands off after you touch the browser.
+ *
+ * Navigating the page out from under someone who is mid-booking destroys the
+ * verification they just solved, so a scheduled check waits instead.
+ */
+const USER_ACTIVITY_GRACE_MS = 3 * 60_000;
+
 export interface DashboardState {
   identity: {
     country: 'Spain';
@@ -63,6 +71,7 @@ export interface DashboardState {
   sessionStatus: string;
   notifications: ReturnType<NotificationManager['status']>;
   browserOpen: boolean;
+  browserInUse: boolean;
   errorCount: number;
   lastError: MonitorState['lastError'];
   intervalRange: { minSeconds: number; maxSeconds: number; tier: string };
@@ -162,6 +171,8 @@ export class MonitorManager extends EventEmitter {
   /** Resume after a CAPTCHA/login takeover, or after a manual pause. */
   async resume(): Promise<void> {
     this.stopTakeoverWatch();
+    // Pressing Resume is you handing control back.
+    this.browser.clearUserActivity();
     this.structureFailures = 0;
     this.patch({
       runState: 'RUNNING',
@@ -350,6 +361,13 @@ export class MonitorManager extends EventEmitter {
 
   private async runCheck(trigger: 'scheduled' | 'manual'): Promise<AvailabilityResult | null> {
     if (this.state.runState !== 'RUNNING' && trigger === 'scheduled') return null;
+
+    // Never steal the page while you are working in it.
+    if (trigger === 'scheduled' && this.browser.userActiveWithin(USER_ACTIVITY_GRACE_MS)) {
+      this.log('You are using the browser, so this check is postponed', 'info');
+      this.scheduleNext();
+      return null;
+    }
 
     this.log('Appointment check started', 'info');
 
@@ -651,6 +669,7 @@ export class MonitorManager extends EventEmitter {
       sessionStatus: this.session.getStatus(),
       notifications: this.notifications.status(),
       browserOpen: this.browser.isRunning(),
+      browserInUse: this.browser.userActiveWithin(USER_ACTIVITY_GRACE_MS),
       errorCount: this.state.errorCount,
       lastError: this.state.lastError,
       intervalRange: range,

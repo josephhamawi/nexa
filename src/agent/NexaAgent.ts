@@ -240,6 +240,13 @@ export class NexaAgent extends EventEmitter {
 
     if (plan.control) return this.handleControl(plan.control);
 
+    // Saying "I cannot do that" is the whole point of this branch. Falling
+    // through to a web search would return something that looks like success.
+    if (plan.unsupported) {
+      this.activity.add(`Declined: no tool for ${plan.unsupported.capability}`, 'warn');
+      return { text: this.describeUnsupported(plan.unsupported.capability), created: false };
+    }
+
     const task = this.tasks.add(
       createTask({
         name: plan.name,
@@ -279,6 +286,34 @@ export class NexaAgent extends EventEmitter {
     lines.push('', `I will report back when it is done. (id ${task.id.slice(0, 8)})`);
 
     return lines.join('\n');
+  }
+
+  /**
+   * Explains the gap honestly and points at what Nexa can actually do, rather
+   * than quietly substituting a weaker action.
+   */
+  private describeUnsupported(capability: string): string {
+    const alternatives: Record<string, string> = {
+      calendar: 'I have no calendar access, so I cannot create events or reminders.',
+      messaging: 'I cannot send email, SMS or chat messages on your behalf. I only report back to you, here and on Telegram.',
+      purchasing: 'I will not buy, order or pay for anything. That stays yours.',
+      'social posting': 'I cannot post to social accounts.',
+      'form submission': 'I will not submit applications or forms for you.',
+      'writing files': 'I can read files in folders you allow, but I do not create, edit or delete them.',
+    };
+
+    return [
+      `I cannot do that. ${alternatives[capability] ?? `I have no tool for ${capability}.`}`,
+      '',
+      'What I can do:',
+      '- research something and report back',
+      '- watch a page or search and tell you when it meaningfully changes',
+      '- run a browser workflow and collect what it finds',
+      '- read files in folders you have allowed',
+      '- repeat any of those on a schedule',
+      '',
+      'If you want the information rather than the action, ask me to research it.',
+    ].join('\n');
   }
 
   private handleControl(control: ControlIntent): AgentResponse {

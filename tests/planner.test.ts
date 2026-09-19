@@ -143,3 +143,40 @@ describe('task titles', () => {
     expect(plan.description).toContain('every morning at 8am');
   });
 });
+
+describe('capability honesty', () => {
+  it('refuses actions Nexa has no tool for, rather than searching the web', () => {
+    for (const request of [
+      'add to my calendar a meeting tomorrow',
+      'schedule a meeting with the team on Friday',
+      'send an email to john@example.com',
+      'buy me a domain name',
+      'post this on linkedin',
+      'apply to that job for me',
+    ]) {
+      expect(planner.detectUnsupported(request), request).not.toBeNull();
+    }
+  });
+
+  it('still treats a research question as research even when it mentions those verbs', () => {
+    for (const request of [
+      'research how to buy a domain name',
+      'find me the best calendar apps',
+      'what is the cheapest way to send email at scale',
+      'compare tools for scheduling meetings',
+    ]) {
+      expect(planner.detectUnsupported(request), request).toBeNull();
+    }
+  });
+
+  it('produces a plan with no steps so nothing is executed', async () => {
+    const plan = await planner.plan('add to my calendar a meeting tomorrow', context());
+    expect(plan.unsupported?.capability).toBe('calendar');
+    expect(plan.steps).toHaveLength(0);
+  });
+
+  it('leaves supported work alone', () => {
+    expect(planner.detectUnsupported('watch https://example.com for changes')).toBeNull();
+    expect(planner.detectUnsupported('research AI agent frameworks')).toBeNull();
+  });
+});

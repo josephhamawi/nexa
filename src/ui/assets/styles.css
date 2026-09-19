@@ -113,12 +113,19 @@ body {
   padding: 0 8px;
 }
 
+/* The same mark as the app icon: an N whose diagonal carries the signal. */
 .mark {
-  width: 16px;
-  height: 16px;
-  border-radius: 3px;
-  background: linear-gradient(135deg, var(--accent) 0 50%, var(--ink) 50% 100%);
+  width: 19px;
+  height: 19px;
   flex: 0 0 auto;
+}
+
+.mark-stem {
+  fill: var(--ink);
+}
+
+.mark-signal {
+  fill: var(--accent);
 }
 
 .wordmark {

@@ -17,27 +17,57 @@ const run = promisify(execFile);
 const root = path.resolve(import.meta.dirname, '..');
 const buildDir = path.join(root, 'build');
 
-/** The Nexa mark: a split square, the same shape used in the dashboard rail. */
+/** The Nexa mark: an N whose diagonal carries a signal between two nodes. */
 const SVG = `
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="field" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1b2330"/>
-      <stop offset="1" stop-color="#0d1117"/>
+    <!-- Deep slate field, lit from the top left like a physical object -->
+    <linearGradient id="field" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#27313f"/>
+      <stop offset="0.55" stop-color="#151c26"/>
+      <stop offset="1" stop-color="#0b0f15"/>
     </linearGradient>
+
+    <!-- The signal running through the mark -->
+    <linearGradient id="signal" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#2f6fe0"/>
+      <stop offset="0.5" stop-color="#5b9bff"/>
+      <stop offset="1" stop-color="#8fc2ff"/>
+    </linearGradient>
+
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.22"/>
+    </linearGradient>
+
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
 
-  <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#field)"/>
-  <rect x="96" y="96" width="832" height="832" rx="196" fill="none"
-        stroke="#ffffff" stroke-opacity="0.08" stroke-width="6"/>
+  <!-- macOS-style squircle -->
+  <rect x="88" y="88" width="848" height="848" rx="196" fill="url(#field)"/>
+  <rect x="88" y="88" width="848" height="848" rx="196" fill="url(#edge)"/>
 
-  <!-- N as two uprights and a diagonal, drawn as solid bars -->
-  <g fill="#e6edf3">
-    <rect x="330" y="300" width="70" height="424" rx="14"/>
-    <rect x="624" y="300" width="70" height="424" rx="14"/>
-    <polygon points="400,300 470,300 694,640 694,724 624,724 400,384"/>
+  <!-- Faint grid: an instrument panel, not a toy -->
+  <g stroke="#ffffff" stroke-opacity="0.045" stroke-width="2">
+    <path d="M88 320h848M88 512h848M88 704h848M320 88v848M512 88v848M704 88v848"/>
   </g>
-  <rect x="330" y="300" width="70" height="424" rx="14" fill="#1f5fd0" fill-opacity="0.9"/>
+
+  <!-- The N: two uprights and a diagonal that carries the signal -->
+  <g>
+    <rect x="316" y="300" width="74" height="424" rx="16" fill="#e8eef6"/>
+    <rect x="634" y="300" width="74" height="424" rx="16" fill="#e8eef6"/>
+    <path d="M390 300 L390 404 L634 724 L634 620 Z" fill="url(#signal)" filter="url(#glow)"/>
+  </g>
+
+  <!-- Nodes: the agent taking a step, acting, arriving -->
+  <circle cx="353" cy="300" r="34" fill="url(#signal)"/>
+  <circle cx="671" cy="724" r="34" fill="url(#signal)"/>
+  <circle cx="353" cy="300" r="15" fill="#0b0f15" fill-opacity="0.55"/>
+  <circle cx="671" cy="724" r="15" fill="#0b0f15" fill-opacity="0.55"/>
 </svg>
 `;
 

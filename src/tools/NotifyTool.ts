@@ -54,10 +54,18 @@ export class NotifyTool implements Tool<Input> {
       chatId: input.chatId ?? context.task.sourceChatId ?? null,
     });
 
+    const best = items.length > 0 ? Math.max(...items.map((item) => item.score ?? 0)) : 0;
+    const quality = items.length === 0 ? 'nothing found' : best < 25 ? 'weak match' : 'ok';
+
     return {
       ok: true,
-      summary: outcome.telegram.ok ? 'Report sent to Telegram' : 'Report ready (Telegram unavailable)',
-      data: { report: body, delivered: outcome.telegram.ok, items },
+      summary:
+        quality === 'ok'
+          ? outcome.telegram.ok
+            ? 'Report sent to Telegram'
+            : 'Report ready (Telegram unavailable)'
+          : `Report sent, but ${quality}`,
+      data: { report: body, delivered: outcome.telegram.ok, items, quality },
     };
   }
 
@@ -69,6 +77,11 @@ export class NotifyTool implements Tool<Input> {
         : `Nothing matched for "${context.task.name}". No results were found this run.`;
     }
 
+    // Scores come from the analysis step. If nothing scored well, the honest
+    // report says so rather than presenting the closest miss as an answer.
+    const best = Math.max(...items.map((item) => item.score ?? 0));
+    const weak = best < 25;
+
     const lines = items
       .slice(0, 10)
       .map((item, index) => {
@@ -79,7 +92,11 @@ export class NotifyTool implements Tool<Input> {
       })
       .join('\n\n');
 
-    const header = `${items.length} result${items.length === 1 ? '' : 's'} for "${context.task.name}"`;
+    const header = weak
+      ? `Nothing clearly matched "${context.task.name}". The closest ${items.length} result${
+          items.length === 1 ? '' : 's'
+        } I found:`
+      : `${items.length} result${items.length === 1 ? '' : 's'} for "${context.task.name}"`;
 
     if (!this.llm.available) return `${header}\n\n${lines}`;
 
@@ -101,7 +118,9 @@ export class NotifyTool implements Tool<Input> {
         ],
       });
       const text = result.text.trim();
-      return text ? `${text}\n\n${lines}` : `${header}\n\n${lines}`;
+      if (!text) return `${header}\n\n${lines}`;
+      // Keep the caveat even when the model writes the prose.
+      return weak ? `${header}\n\n${text}\n\n${lines}` : `${text}\n\n${lines}`;
     } catch {
       // A model hiccup must not stop the report going out.
       return `${header}\n\n${lines}`;

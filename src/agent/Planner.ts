@@ -18,6 +18,21 @@ export interface Plan {
   method: 'model' | 'rules';
   /** Set when the request is about Nexa itself rather than outside work. */
   control?: ControlIntent;
+  /** Set when nothing Nexa has can do what was asked. */
+  unsupported?: UnsupportedIntent;
+}
+
+/**
+ * A request Nexa has no tool for.
+ *
+ * Without this, an action it cannot perform ("add a meeting to my calendar")
+ * falls through to the research fallback and comes back as a web search marked
+ * COMPLETED, which is worse than useless: it looks like success.
+ */
+export interface UnsupportedIntent {
+  capability: string;
+  /** What the user actually asked for, echoed back. */
+  request: string;
 }
 
 export interface ControlIntent {
@@ -71,6 +86,38 @@ export class Planner {
     return null;
   }
 
+  /**
+   * Actions Nexa has no tool for.
+   *
+   * Only fires on imperatives: "research how to buy a domain" is a research
+   * question and stays one, while "buy a domain" is an action Nexa cannot take.
+   */
+  detectUnsupported(text: string): UnsupportedIntent | null {
+    const lower = text.trim().toLowerCase();
+
+    // An explicit research framing wins: the user wants information, not action.
+    if (/^(research|find out|look up|compare|summari[sz]e|what|which|who|when|where|why|how)\b/.test(lower)) {
+      return null;
+    }
+    if (/\b(research|find me|search for|look up|tell me about)\b/.test(lower)) return null;
+
+    const capabilities: { pattern: RegExp; capability: string }[] = [
+      { pattern: /\b(add|put|create|schedule|book)\b[^.]{0,40}\b(calendar|meeting|event|appointment|reminder)\b/, capability: 'calendar' },
+      { pattern: /\b(calendar|reminder)\b[^.]{0,30}\b(add|create|set)\b/, capability: 'calendar' },
+      { pattern: /\bsend\b[^.]{0,30}\b(email|mail|message|text|whatsapp|sms|dm)\b/, capability: 'messaging' },
+      { pattern: /\b(email|message|text|whatsapp|call|ring|phone)\s+(him|her|them|someone|[a-z]+@)/, capability: 'messaging' },
+      { pattern: /\b(buy|purchase|order|pay for|subscribe to|book a (flight|hotel|table|room|ticket))\b/, capability: 'purchasing' },
+      { pattern: /\bpost\b[^.]{0,30}\b(twitter|x|linkedin|instagram|facebook|reddit|tiktok)\b/, capability: 'social posting' },
+      { pattern: /\b(apply|submit)\b[^.]{0,30}\b(application|form|job|cv|resume)\b/, capability: 'form submission' },
+      { pattern: /\b(delete|remove|rename|move|write|edit|save)\b[^.]{0,20}\b(file|folder|document)\b/, capability: 'writing files' },
+    ];
+
+    for (const { pattern, capability } of capabilities) {
+      if (pattern.test(lower)) return { capability, request: text.trim() };
+    }
+    return null;
+  }
+
   async plan(request: string, context: PlanContext): Promise<Plan> {
     const control = this.detectControl(request);
     if (control) {
@@ -84,6 +131,21 @@ export class Planner {
         approvalRequired: false,
         method: 'rules',
         control,
+      };
+    }
+
+    const unsupported = this.detectUnsupported(request);
+    if (unsupported) {
+      return {
+        name: 'Unsupported request',
+        description: request,
+        type: TaskType.CONTROL,
+        steps: [],
+        permissions: [Permission.READ],
+        recurrence: { kind: 'once' },
+        approvalRequired: false,
+        method: 'rules',
+        unsupported,
       };
     }
 

@@ -304,7 +304,7 @@ export class MonitorManager extends EventEmitter {
     }
 
     this.log('Reading the visa lists from the BLS form', 'info');
-    const result = await this.adapter.discoverFormOptions();
+    const result = await this.adapter.discoverFormOptions(this.postGateUrl);
 
     if (!result.ok) {
       this.log(`Could not read the BLS lists: ${result.reason}`, 'warn');
@@ -598,9 +598,15 @@ export class MonitorManager extends EventEmitter {
           // Past the gate: remember this page and read it from now on, rather
           // than walking the funnel again and landing straight back on it.
           const url = snapshot.url;
-          if (url && !/visatypeverification/i.test(url) && !/\/account\//i.test(url)) {
+          if (BLS_URLS.availabilityFormPattern.test(url)) {
+            // The availability form carries a ?data= token tied to the
+            // verification you just solved. Replaying it is what buys several
+            // checks from one challenge.
             this.postGateUrl = url;
-            this.log(`Will read this page from now on: ${url}`, 'info');
+            this.log('Saved the availability form. Re-checking will reuse your verification.', 'success');
+          } else if (url && !/visatypeverification/i.test(url) && !/\/account\//i.test(url)) {
+            this.postGateUrl = url;
+            this.log(`Will read this page from now on: ${url.split('?')[0]}`, 'info');
           }
 
           this.stopTakeoverWatch();

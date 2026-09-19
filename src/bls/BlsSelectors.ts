@@ -63,6 +63,13 @@ export const BLS_URLS = {
    * the image challenge behind it is solved by a person.
    */
   bookNewAppointment: `${PORTAL_ORIGIN}/Global/bls/visatypeverification`,
+  /**
+   * The availability form itself, reached only after the verification gate.
+   * Its URL carries a ?data= token tied to that verification, so it is worth
+   * replaying: while the token lasts, availability can be re-read without
+   * asking you for another challenge.
+   */
+  availabilityFormPattern: /\/Global\/bls\/visatype\?data=/i,
   myAppointments: `${PORTAL_ORIGIN}/Global/blsappointment/MyAppointments`,
   visaTypeVerification: `${PORTAL_ORIGIN}/Global/bls/visatypeverification`,
   /**
@@ -225,6 +232,12 @@ export const SITE_ERROR_PATTERNS: RegExp[] = [
  * no slots were parsed, the adapter raises WebsiteStructureChangedError.
  */
 export const NO_APPOINTMENT_PATTERNS: RegExp[] = [
+  // Observed verbatim on the live form (September 2026):
+  // "Currently, no slots are available for the selected category. Slots are
+  //  released basis instructions from Client Government."
+  /\bno slots are available for the selected category\b/i,
+  /\bno appointments available\b/i,
+  /\bslots are released basis instructions\b/i,
   /\bno (appointment|appointments|slot|slots)\b[^.]{0,80}\b(available|free|found|open)\b/i,
   /\bno\s+(available|free)\s+(appointment|appointments|slot|slots|date|dates)\b/i,
   /\b(appointment|slot)s?\s+(are|is)\s+not\s+available\b/i,

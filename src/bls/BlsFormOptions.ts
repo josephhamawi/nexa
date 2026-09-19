@@ -29,20 +29,21 @@ export interface BlsFormOptions {
   locations: string[];
 }
 
-export const SHORT_STAY = 'Short Stay';
-export const NATIONAL = 'National';
+/** Exactly as the live BLS form words them (observed September 2026). */
+export const SHORT_STAY = 'Schengen Visa/ Short Term Visa';
+export const NATIONAL = 'National Visa/ Long Term Visa';
 
 export const SEEDED_VISA_TYPES: string[] = [SHORT_STAY, NATIONAL];
 
 /** Short-stay (Schengen) categories published on the Nigeria site. */
 export const SEEDED_SHORT_STAY_CATEGORIES: string[] = [
-  'Tourist',
-  'Business',
+  'Tourist Visa',
+  'Business Visa',
   'Family or Friends Visit',
-  'Medical',
-  'Conference',
-  'Transit',
-  'Study (under 90 days)',
+  'Medical Visa',
+  'Conference Visa',
+  'Transit Visa',
+  'Study Visa (under 90 days)',
 ];
 
 /** National (long-stay) categories published on the Nigeria site. */

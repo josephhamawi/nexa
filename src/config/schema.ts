@@ -42,12 +42,12 @@ export const BlsConfigSchema = z
      * currently calls the category (e.g. "Tourist", "Short Stay", "Schengen").
      * Never hard-coded into selectors.
      */
-    visaType: z.string().min(1).default('Short Stay'),
+    visaType: z.string().min(1).default('Schengen Visa/ Short Term Visa'),
     /**
      * Second-level category, when BLS shows one (e.g. visa type "Short Stay"
      * with sub-category "Tourist"). Empty means "the portal only asks once".
      */
-    visaSubCategory: z.string().default('Tourist'),
+    visaSubCategory: z.string().default('Tourist Visa'),
     /** Who the appointment is for. BLS prices and schedules these differently. */
     applicantType: z.enum(['Individual', 'Family', 'Group']).default('Individual'),
     /** Number of applicants. Only meaningful for Family / Group. */

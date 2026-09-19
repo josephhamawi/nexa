@@ -84,15 +84,16 @@ describe('configuration validation', () => {
     expect(parsed.preferredTimeTo).toBe('13:00');
   });
 
-  it('defaults to a single individual applicant on a short-stay tourist visa', () => {
+  it('defaults to a single individual applicant on a Schengen tourist visa', () => {
     const { visaType, visaSubCategory, applicantType, memberCount, ...rest } = valid.bls;
     void visaType;
     void visaSubCategory;
     void applicantType;
     void memberCount;
     const parsed = BlsConfigSchema.parse(rest);
-    expect(parsed.visaType).toBe('Short Stay');
-    expect(parsed.visaSubCategory).toBe('Tourist');
+    // The live BLS form words these exactly this way.
+    expect(parsed.visaType).toBe('Schengen Visa/ Short Term Visa');
+    expect(parsed.visaSubCategory).toBe('Tourist Visa');
     expect(parsed.applicantType).toBe('Individual');
     expect(parsed.memberCount).toBe(1);
   });

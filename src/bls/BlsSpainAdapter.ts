@@ -20,7 +20,9 @@ import {
 } from './BlsSelectors';
 import {
   PROBE_SELECTORS,
+  detectAppointmentWording,
   detectHumanVerification,
+  detectNoAppointments,
   detectLoginRequired,
   detectMfaPrompt,
   detectSiteError,
@@ -349,6 +351,33 @@ export class BlsSpainAdapter {
     });
     await page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined);
     await sleep(shortPauseMs(700, 900));
+    await this.waitForVerdict(page);
+  }
+
+  /**
+   * Waits for the form to actually answer after Submit.
+   *
+   * BLS replies either with a "No Appointments Available" dialog or with a
+   * calendar, and both arrive a moment after the click. Reading the page too
+   * early would see neither, which the parser would (correctly) refuse to
+   * interpret, so this waits for one of them.
+   */
+  private async waitForVerdict(page: Page, timeoutMs = 15_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        const snapshot = await this.snapshot(page, null);
+        if (detectNoAppointments(snapshot).detected) return;
+        if (detectHumanVerification(snapshot).detected) return;
+        if (detectAppointmentWording(snapshot).detected) return;
+        const candidates = await this.collectSlotCandidates(page);
+        if (candidates.length > 0) return;
+      } catch {
+        // mid-navigation; look again shortly
+      }
+      await sleep(1000);
+    }
+    log.debug('no verdict seen before the timeout; reading the page as it stands');
   }
 
   // -------------------------------------------------------------------- gates
@@ -826,13 +855,13 @@ export class BlsSpainAdapter {
    * selected, submitted or booked. Requires an authenticated session; without
    * one it reports why and the UI falls back to the seeded lists.
    */
-  async discoverFormOptions(): Promise<
+  async discoverFormOptions(entryUrl?: string | null): Promise<
     { ok: true; options: BlsFormOptions } | { ok: false; reason: string; status: AvailabilityStatus }
   > {
-    return this.browser.runOwned(() => this.runDiscoverFormOptions());
+    return this.browser.runOwned(() => this.runDiscoverFormOptions(entryUrl));
   }
 
-  private async runDiscoverFormOptions(): Promise<
+  private async runDiscoverFormOptions(entryUrl?: string | null): Promise<
     { ok: true; options: BlsFormOptions } | { ok: false; reason: string; status: AvailabilityStatus }
   > {
     const page = await this.browser.getPage();
@@ -840,13 +869,13 @@ export class BlsSpainAdapter {
     this.loginRedirectSeen = false;
 
     try {
-      const entry = await this.navigate(page, BLS_URLS.entry);
+      const entry = await this.navigate(page, entryUrl ?? BLS_URLS.entry);
       let snapshot = await this.snapshot(page, entry?.status() ?? null);
 
       const gate = await this.evaluateGates(page, snapshot);
       if (gate) return { ok: false, reason: gate.message, status: gate.status };
 
-      snapshot = await this.enterBookingFlow(page, snapshot);
+      if (!entryUrl) snapshot = await this.enterBookingFlow(page, snapshot);
 
       const afterEntry = await this.evaluateGates(page, snapshot);
       if (afterEntry) return { ok: false, reason: afterEntry.message, status: afterEntry.status };

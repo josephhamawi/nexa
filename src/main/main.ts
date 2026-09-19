@@ -5,15 +5,17 @@ import path from 'node:path';
 import { app, BrowserWindow, shell } from 'electron';
 import { ensureDataDirs, loadConfig, loadEnv } from '../config/config';
 import { childLogger, logger } from '../logging/logger';
-import { MonitorManager } from '../monitoring/MonitorManager';
+import { NexaAgent } from '../agent/NexaAgent';
+import { TelegramBot } from '../telegram/TelegramBot';
 import { registerIpc } from './ipc';
 
 const log = childLogger('main');
 
 let window: BrowserWindow | null = null;
-let monitor: MonitorManager | null = null;
+let agent: NexaAgent | null = null;
+let bot: TelegramBot | null = null;
 
-/** Single instance only, two dashboards would mean two monitoring loops. */
+/** Single instance only: two agents would fight over the browser profiles. */
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -29,15 +31,19 @@ if (!app.requestSingleInstanceLock()) {
 async function bootstrap(): Promise<void> {
   ensureDataDirs();
   loadEnv();
-  logger().info('BLS Spain Lagos monitor starting');
+  logger().info('Nexa starting');
 
   await app.whenReady();
 
   const config = loadConfig();
-  monitor = new MonitorManager(config);
+  agent = new NexaAgent(config);
+  agent.start();
+
+  bot = new TelegramBot(agent, agent.notifications.telegram, config.telegram);
+  bot.start();
 
   createWindow();
-  registerIpc(monitor, () => window);
+  registerIpc(agent, bot, () => window);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -46,12 +52,12 @@ async function bootstrap(): Promise<void> {
 
 function createWindow(): void {
   window = new BrowserWindow({
-    width: 1120,
-    height: 860,
-    minWidth: 900,
-    minHeight: 700,
-    title: 'BLS Spain Appointment Monitor, Lagos',
-    backgroundColor: '#0f1420',
+    width: 1240,
+    height: 900,
+    minWidth: 980,
+    minHeight: 720,
+    title: 'Nexa',
+    backgroundColor: '#0d1117',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -67,20 +73,19 @@ function createWindow(): void {
   window.once('ready-to-show', () => window?.show());
 
   /**
-   * Without these, a dashboard that fails to load just shows the window's
+   * Without these a renderer that fails to load just shows the window's
    * background colour and looks like a hung black screen. That happens if the
-   * app bundle is replaced while it is running (an upgrade over a live copy),
-   * or if the renderer is killed for memory.
+   * app bundle is replaced while it is running, or the renderer is killed.
    */
-  window.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-    log.error({ errorCode, errorDescription, url: validatedURL }, 'dashboard failed to load');
+  window.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    log.error({ errorCode, errorDescription }, 'dashboard failed to load');
     void window?.webContents.loadURL(
       'data:text/html;charset=utf-8,' +
         encodeURIComponent(
-          `<body style="font:14px ui-monospace,monospace;background:#f4f0e8;color:#1d1a16;padding:28px">
-             <h2 style="margin:0 0 10px">Dashboard failed to load</h2>
+          `<body style="font:14px ui-monospace,monospace;background:#0d1117;color:#e6edf3;padding:28px">
+             <h2 style="margin:0 0 10px">Nexa could not load its dashboard</h2>
              <p>${errorDescription} (${errorCode})</p>
-             <p>If the application was updated while it was open, quit it completely and start it again.</p>
+             <p>If Nexa was updated while open, quit it completely and start it again.</p>
            </body>`,
         ),
     );
@@ -90,8 +95,6 @@ function createWindow(): void {
     log.error({ reason: details.reason }, 'renderer process gone, reloading');
     if (details.reason !== 'clean-exit') window?.webContents.reload();
   });
-
-  window.webContents.on('unresponsive', () => log.warn('dashboard is unresponsive'));
 
   // External links open in the user's own browser, never inside the dashboard.
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -119,7 +122,8 @@ async function shutdown(): Promise<void> {
   shuttingDown = true;
   log.info('shutting down');
   try {
-    await monitor?.shutdown();
+    await bot?.stop();
+    await agent?.stop();
   } catch (err) {
     log.warn({ err: (err as Error).message }, 'shutdown error');
   }

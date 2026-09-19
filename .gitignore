@@ -2,18 +2,13 @@
 .env
 .env.local
 
-# Your own settings: visa type, category, applicant count, date window.
-# config.example.json is the template that ships instead.
+# Your own settings: profile, provider, folders.
 config.json
 
-# Runtime data: browser profile with your BLS session, screenshots of your
-# account, logs and monitor state.
-data/sessions/
-data/screenshots/
-data/logs/
-data/state/
+# Runtime data: browser profiles with live sessions, evidence, logs, state.
+data/
 
-# Build output and installers (the .dmg is ~108 MB).
+# Build output and installers.
 node_modules/
 dist/
 release/

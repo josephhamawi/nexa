@@ -17,35 +17,27 @@ const run = promisify(execFile);
 const root = path.resolve(import.meta.dirname, '..');
 const buildDir = path.join(root, 'build');
 
-/** Red field, gold band, three bars, the same seal as the dashboard masthead. */
+/** The Nexa mark: a split square, the same shape used in the dashboard rail. */
 const SVG = `
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="field" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#bf2d26"/>
-      <stop offset="1" stop-color="#8d1a17"/>
-    </linearGradient>
-    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
-      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0.04"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0.12"/>
+    <linearGradient id="field" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b2330"/>
+      <stop offset="1" stop-color="#0d1117"/>
     </linearGradient>
   </defs>
 
   <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#field)"/>
-  <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#sheen)"/>
   <rect x="96" y="96" width="832" height="832" rx="196" fill="none"
-        stroke="#f4f0e8" stroke-opacity="0.18" stroke-width="6"/>
+        stroke="#ffffff" stroke-opacity="0.08" stroke-width="6"/>
 
-  <!-- gold band -->
-  <rect x="96" y="452" width="832" height="120" fill="#d8a93f" fill-opacity="0.95"/>
-
-  <!-- three bars: the seal from the masthead -->
-  <g fill="#f7f2e8">
-    <rect x="336" y="300" width="56" height="424" rx="16"/>
-    <rect x="484" y="248" width="56" height="528" rx="16"/>
-    <rect x="632" y="300" width="56" height="424" rx="16"/>
+  <!-- N as two uprights and a diagonal, drawn as solid bars -->
+  <g fill="#e6edf3">
+    <rect x="330" y="300" width="70" height="424" rx="14"/>
+    <rect x="624" y="300" width="70" height="424" rx="14"/>
+    <polygon points="400,300 470,300 694,640 694,724 624,724 400,384"/>
   </g>
+  <rect x="330" y="300" width="70" height="424" rx="14" fill="#1f5fd0" fill-opacity="0.9"/>
 </svg>
 `;
 

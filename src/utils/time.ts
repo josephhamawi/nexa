@@ -22,7 +22,7 @@ const pad = (n: number): string => String(n).padStart(2, '0');
  * Accepts ISO (2026-10-14), slashed d/m/Y and Y/m/d, and textual forms
  * ("14 October 2026", "October 14, 2026", "14-Oct-2026").
  * Returns null when the input cannot be interpreted with confidence, callers
- * must treat null as "could not parse", never as "no appointment".
+ * must treat null as "could not parse", never as a silent default.
  */
 export function normalizeDate(input: string | null | undefined): string | null {
   if (!input) return null;
@@ -47,7 +47,7 @@ export function normalizeDate(input: string | null | undefined): string | null {
     if (month) return buildDate(expandYear(Number(mdy[3])), month, Number(mdy[2]));
   }
 
-  // 14/10/2026, day-first. BLS Nigeria uses en-GB ordering throughout.
+  // 14/10/2026, day-first (en-GB ordering).
   const slashed = raw.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b/);
   if (slashed) return buildDate(Number(slashed[3]), Number(slashed[2]), Number(slashed[1]));
 

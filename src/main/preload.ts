@@ -1,42 +1,61 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 /**
- * The renderer gets a narrow, explicit API, no Node access, no remote module.
- * Every channel here is request/response except the two push subscriptions.
+ * The renderer's only capability.
+ *
+ * No Node, no remote module, no direct filesystem or network access: every
+ * channel below is an explicit request the main process validates. Secrets can
+ * be written through here but never read back.
  */
 const api = {
-  getState: () => ipcRenderer.invoke('monitor:getState'),
-  getEvents: () => ipcRenderer.invoke('monitor:getEvents'),
-  start: () => ipcRenderer.invoke('monitor:start'),
-  pause: () => ipcRenderer.invoke('monitor:pause'),
-  resume: () => ipcRenderer.invoke('monitor:resume'),
-  stop: () => ipcRenderer.invoke('monitor:stop'),
-  checkNow: () => ipcRenderer.invoke('monitor:checkNow'),
-  openBrowser: () => ipcRenderer.invoke('monitor:openBrowser'),
-  openLogin: () => ipcRenderer.invoke('monitor:openLogin'),
-  openScreenshot: (path: string) => ipcRenderer.invoke('monitor:openScreenshot', path),
-  openScreenshotFolder: () => ipcRenderer.invoke('monitor:openScreenshotFolder'),
+  // agent
+  getState: () => ipcRenderer.invoke('agent:state'),
+  getActivity: () => ipcRenderer.invoke('agent:activity'),
+  request: (text: string) => ipcRenderer.invoke('agent:request', text),
+
+  // tasks
+  getTask: (id: string) => ipcRenderer.invoke('task:get', id),
+  pauseTask: (id: string) => ipcRenderer.invoke('task:pause', id),
+  resumeTask: (id: string) => ipcRenderer.invoke('task:resume', id),
+  cancelTask: (id: string) => ipcRenderer.invoke('task:cancel', id),
+  runTask: (id: string) => ipcRenderer.invoke('task:run', id),
+  approveTask: (id: string, approved: boolean) => ipcRenderer.invoke('task:approve', { id, approved }),
+
+  // watchers
+  setWatcherStatus: (id: string, status: 'ACTIVE' | 'PAUSED') =>
+    ipcRenderer.invoke('watcher:setStatus', { id, status }),
+  removeWatcher: (id: string) => ipcRenderer.invoke('watcher:remove', id),
+  checkWatcher: (id: string) => ipcRenderer.invoke('watcher:check', id),
+
+  // browser and evidence
+  openBrowser: (profileId?: string) => ipcRenderer.invoke('browser:open', profileId ?? 'default'),
+  openEvidence: (path: string) => ipcRenderer.invoke('evidence:open', path),
+  openEvidenceFolder: () => ipcRenderer.invoke('evidence:openFolder'),
+
+  // configuration and secrets
   getConfig: () => ipcRenderer.invoke('config:get'),
-  getOptions: () => ipcRenderer.invoke('options:get'),
-  refreshOptions: () => ipcRenderer.invoke('options:refresh'),
-  getTelegram: () => ipcRenderer.invoke('telegram:get'),
-  saveTelegram: (values: { botToken: string; chatId: string }) =>
-    ipcRenderer.invoke('telegram:save', values),
   saveConfig: (patch: unknown) => ipcRenderer.invoke('config:save', patch),
+  pickFolder: () => ipcRenderer.invoke('config:pickFolder'),
+  getSecrets: () => ipcRenderer.invoke('secrets:get'),
+  saveTelegram: (values: { botToken: string; chatId: string }) =>
+    ipcRenderer.invoke('secrets:saveTelegram', values),
+  saveLlm: (values: { provider: string; apiKey: string; baseUrl?: string }) =>
+    ipcRenderer.invoke('secrets:saveLlm', values),
   testNotifications: () => ipcRenderer.invoke('notifications:test'),
 
+  // push
   onState: (handler: (state: unknown) => void) => {
     const listener = (_event: unknown, state: unknown): void => handler(state);
-    ipcRenderer.on('monitor:state', listener);
-    return () => ipcRenderer.removeListener('monitor:state', listener);
+    ipcRenderer.on('agent:state', listener);
+    return () => ipcRenderer.removeListener('agent:state', listener);
   },
-  onEvent: (handler: (event: unknown) => void) => {
-    const listener = (_event: unknown, payload: unknown): void => handler(payload);
-    ipcRenderer.on('monitor:event', listener);
-    return () => ipcRenderer.removeListener('monitor:event', listener);
+  onActivity: (handler: (entry: unknown) => void) => {
+    const listener = (_event: unknown, entry: unknown): void => handler(entry);
+    ipcRenderer.on('agent:activity', listener);
+    return () => ipcRenderer.removeListener('agent:activity', listener);
   },
 };
 
-contextBridge.exposeInMainWorld('bls', api);
+contextBridge.exposeInMainWorld('nexa', api);
 
-export type BlsBridge = typeof api;
+export type NexaBridge = typeof api;

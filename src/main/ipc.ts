@@ -1,107 +1,144 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import { ipcMain, shell, type BrowserWindow } from 'electron';
-import type { MonitorManager } from '../monitoring/MonitorManager';
+import { ipcMain, shell, dialog, type BrowserWindow } from 'electron';
+import { ZodError } from 'zod';
+import type { NexaAgent } from '../agent/NexaAgent';
+import type { TelegramBot } from '../telegram/TelegramBot';
 import {
   hasTelegramCredentials,
   loadConfig,
   loadEnv,
   paths,
-  saveConfig,
   writeEnvValues,
 } from '../config/config';
 import { AppConfigSchema } from '../config/schema';
-import { ZodError } from 'zod';
 import { childLogger } from '../logging/logger';
 
 const log = childLogger('ipc');
 
 /**
- * Wires the dashboard to the monitor.
+ * The dashboard's entire surface onto the agent.
  *
- * The renderer can start, pause, resume, stop, check and open the browser -
- * it cannot drive the page, and there is deliberately no channel that books or
- * pays for anything.
+ * Deliberately narrow: the renderer can ask Nexa to do things, but it cannot
+ * touch the filesystem, the browser or the network directly. Secrets go in
+ * through here and never come back out.
  */
-export function registerIpc(monitor: MonitorManager, getWindow: () => BrowserWindow | null): void {
-  ipcMain.handle('monitor:getState', () => monitor.dashboardState());
-  ipcMain.handle('monitor:getEvents', () => monitor.events.recent(120));
+export function registerIpc(
+  agent: NexaAgent,
+  bot: TelegramBot,
+  getWindow: () => BrowserWindow | null,
+): void {
+  // ------------------------------------------------------------------ state
+  ipcMain.handle('agent:state', () => agent.dashboardState());
+  ipcMain.handle('agent:activity', () => agent.activity.recent(150));
 
-  ipcMain.handle('monitor:start', async () => {
-    await monitor.start();
-    return monitor.dashboardState();
-  });
-
-  ipcMain.handle('monitor:pause', () => {
-    monitor.pause();
-    return monitor.dashboardState();
-  });
-
-  ipcMain.handle('monitor:resume', async () => {
-    await monitor.resume();
-    return monitor.dashboardState();
-  });
-
-  ipcMain.handle('monitor:stop', async () => {
-    await monitor.stop(false);
-    return monitor.dashboardState();
-  });
-
-  ipcMain.handle('monitor:checkNow', async () => {
-    const outcome = await monitor.checkNow();
-    return { ...outcome, state: monitor.dashboardState() };
-  });
-
-  ipcMain.handle('monitor:openBrowser', async () => {
-    await monitor.openBrowser();
-    return monitor.dashboardState();
-  });
-
-  // Opens the portal's login page for a manual sign-in. There is deliberately
-  // no channel that accepts credentials: nothing in this application types,
-  // stores or reads a BLS password.
-  ipcMain.handle('monitor:openLogin', async () => {
-    await monitor.openLoginPage();
-    return monitor.dashboardState();
-  });
-
-  ipcMain.handle('monitor:openScreenshot', async (_event, filePath: unknown) => {
-    if (typeof filePath !== 'string') return { ok: false, error: 'invalid path' };
-    // Only files inside the project's screenshot directory may be opened.
-    const resolved = path.resolve(filePath);
-    if (!resolved.startsWith(path.resolve(paths.screenshots))) {
-      return { ok: false, error: 'path outside the screenshot directory' };
+  ipcMain.handle('agent:request', async (_event, text: unknown) => {
+    if (typeof text !== 'string' || !text.trim()) {
+      return { ok: false, error: 'Say what you need first.' };
     }
-    if (!fs.existsSync(resolved)) return { ok: false, error: 'screenshot not found' };
+    try {
+      const response = await agent.handleRequest(text, 'desktop', null);
+      return { ok: true, text: response.text, task: response.task, state: agent.dashboardState() };
+    } catch (err) {
+      log.warn({ err: (err as Error).message }, 'request failed');
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  // ------------------------------------------------------------------ tasks
+  ipcMain.handle('task:get', (_event, id: unknown) =>
+    typeof id === 'string' ? agent.tasks.get(id) : undefined,
+  );
+
+  ipcMain.handle('task:pause', (_event, id: unknown) => {
+    if (typeof id === 'string') agent.tasks.pause(id);
+    return agent.dashboardState();
+  });
+
+  ipcMain.handle('task:resume', (_event, id: unknown) => {
+    if (typeof id === 'string') agent.resumeTask(id);
+    return agent.dashboardState();
+  });
+
+  ipcMain.handle('task:cancel', (_event, id: unknown) => {
+    if (typeof id === 'string') agent.tasks.cancel(id);
+    return agent.dashboardState();
+  });
+
+  ipcMain.handle('task:run', async (_event, id: unknown) => {
+    if (typeof id === 'string') {
+      agent.tasks.enqueue(id);
+    }
+    return agent.dashboardState();
+  });
+
+  ipcMain.handle('task:approve', (_event, payload: unknown) => {
+    const { id, approved } = (payload ?? {}) as { id?: string; approved?: boolean };
+    if (typeof id === 'string') agent.approve(id, Boolean(approved));
+    return agent.dashboardState();
+  });
+
+  // --------------------------------------------------------------- watchers
+  ipcMain.handle('watcher:setStatus', (_event, payload: unknown) => {
+    const { id, status } = (payload ?? {}) as { id?: string; status?: 'ACTIVE' | 'PAUSED' };
+    if (typeof id === 'string' && (status === 'ACTIVE' || status === 'PAUSED')) {
+      agent.watchers.setStatus(id, status);
+    }
+    return agent.dashboardState();
+  });
+
+  ipcMain.handle('watcher:remove', (_event, id: unknown) => {
+    if (typeof id === 'string') agent.watchers.remove(id);
+    return agent.dashboardState();
+  });
+
+  ipcMain.handle('watcher:check', async (_event, id: unknown) => {
+    if (typeof id === 'string') await agent.watchers.check(id);
+    return agent.dashboardState();
+  });
+
+  // ---------------------------------------------------------------- browser
+  ipcMain.handle('browser:open', async (_event, profileId: unknown) => {
+    await agent.openBrowser(typeof profileId === 'string' ? profileId : 'default');
+    return agent.dashboardState();
+  });
+
+  // --------------------------------------------------------------- evidence
+  ipcMain.handle('evidence:open', async (_event, filePath: unknown) => {
+    if (typeof filePath !== 'string') return { ok: false, error: 'invalid path' };
+    // Only files Nexa itself produced may be opened from the renderer.
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(path.resolve(paths.evidence))) {
+      return { ok: false, error: 'path is outside the evidence directory' };
+    }
+    if (!fs.existsSync(resolved)) return { ok: false, error: 'evidence not found' };
     const error = await shell.openPath(resolved);
     return error ? { ok: false, error } : { ok: true };
   });
 
-  ipcMain.handle('monitor:openScreenshotFolder', async () => {
-    const error = await shell.openPath(paths.screenshots);
+  ipcMain.handle('evidence:openFolder', async () => {
+    const error = await shell.openPath(paths.evidence);
     return error ? { ok: false, error } : { ok: true };
   });
 
+  // ----------------------------------------------------------------- config
   ipcMain.handle('config:get', () => loadConfig(true));
 
   ipcMain.handle('config:save', (_event, patch: unknown) => {
     try {
       const current = loadConfig(true);
-      const incoming = (patch ?? {}) as { bls?: Record<string, unknown>; notifications?: Record<string, unknown> };
+      const incoming = (patch ?? {}) as Record<string, Record<string, unknown>>;
       const merged = AppConfigSchema.parse({
-        bls: {
-          ...current.bls,
-          ...(incoming.bls ?? {}),
-          // Lagos is not negotiable, whatever the renderer sends.
-          country: 'Spain',
-          applicationCountry: 'Nigeria',
-          city: 'Lagos',
-          centre: 'Lagos',
-        },
+        llm: { ...current.llm, ...(incoming.llm ?? {}) },
+        telegram: { ...current.telegram, ...(incoming.telegram ?? {}) },
+        agent: { ...current.agent, ...(incoming.agent ?? {}) },
+        files: { ...current.files, ...(incoming.files ?? {}) },
         notifications: { ...current.notifications, ...(incoming.notifications ?? {}) },
+        userProfile: { ...current.userProfile, ...(incoming.userProfile ?? {}) },
+        browserProfiles: incoming.browserProfiles ?? current.browserProfiles,
       });
-      const saved = saveConfig(merged);
-      monitor.applyConfig(saved);
+      const saved = agent.applyConfig(merged);
+      bot.updateConfig(saved.telegram);
       return { ok: true, config: saved };
     } catch (err) {
       const error = describeValidationError(err);
@@ -110,37 +147,39 @@ export function registerIpc(monitor: MonitorManager, getWindow: () => BrowserWin
     }
   });
 
-  ipcMain.handle('options:get', () => monitor.formOptions());
+  ipcMain.handle('config:pickFolder', async () => {
+    const window = getWindow();
+    if (!window) return { ok: false, error: 'no window' };
+    const result = await dialog.showOpenDialog(window, {
+      title: 'Choose a folder Nexa may read',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { ok: false, cancelled: true };
+    return { ok: true, path: result.filePaths[0] };
+  });
 
-  ipcMain.handle('options:refresh', async () => monitor.refreshFormOptions());
-
+  // --------------------------------------------------------------- secrets
   /**
-   * Telegram bot credentials.
-   *
-   * These belong to a bot you create for yourself, and the application needs
-   * them to message you. The token is written to .env with owner-only
-   * permissions, is never sent back to the renderer, and is never logged.
-   * (Contrast with your BLS password, which the application never handles.)
+   * Credentials are write-only from the renderer's point of view: it can set
+   * them and ask whether they exist, but never read them back.
    */
-  ipcMain.handle('telegram:get', () => {
+  ipcMain.handle('secrets:get', () => {
     const env = loadEnv();
     return {
-      configured: hasTelegramCredentials(env),
-      chatId: env.TELEGRAM_CHAT_ID ?? '',
-      tokenPresent: Boolean(env.TELEGRAM_BOT_TOKEN),
+      telegram: { configured: hasTelegramCredentials(env), chatId: env.TELEGRAM_CHAT_ID ?? '', tokenPresent: Boolean(env.TELEGRAM_BOT_TOKEN) },
+      anthropic: { keyPresent: Boolean(env.ANTHROPIC_API_KEY) },
+      openai: { keyPresent: Boolean(env.OPENAI_API_KEY), baseUrl: env.OPENAI_BASE_URL ?? '' },
       envPath: paths.env,
     };
   });
 
-  ipcMain.handle('telegram:save', async (_event, payload: unknown) => {
+  ipcMain.handle('secrets:saveTelegram', async (_event, payload: unknown) => {
     const input = (payload ?? {}) as { botToken?: unknown; chatId?: unknown };
     const chatId = typeof input.chatId === 'string' ? input.chatId.trim() : '';
     const botToken = typeof input.botToken === 'string' ? input.botToken.trim() : '';
 
     if (!chatId) return { ok: false, error: 'Chat ID is required.' };
-    if (!/^-?\d+$/.test(chatId)) {
-      return { ok: false, error: 'Chat ID must be numeric, e.g. 987654321.' };
-    }
+    if (!/^-?\d+$/.test(chatId)) return { ok: false, error: 'Chat ID must be numeric, e.g. 987654321.' };
     if (botToken && !/^\d{6,12}:[A-Za-z0-9_-]{30,}$/.test(botToken)) {
       return { ok: false, error: 'That does not look like a bot token (123456789:AA...).' };
     }
@@ -149,63 +188,73 @@ export function registerIpc(monitor: MonitorManager, getWindow: () => BrowserWin
     }
 
     try {
-      const values: Record<string, string> = { TELEGRAM_CHAT_ID: chatId };
-      if (botToken) values.TELEGRAM_BOT_TOKEN = botToken;
-      writeEnvValues(values);
+      writeEnvValues({ TELEGRAM_CHAT_ID: chatId, ...(botToken ? { TELEGRAM_BOT_TOKEN: botToken } : {}) });
     } catch (err) {
       return { ok: false, error: `Could not write ${paths.env}: ${(err as Error).message}` };
     }
 
-    // Re-create the notifier so it picks the new credentials up immediately.
-    monitor.applyConfig(loadConfig(true));
+    const verified = await agent.notifications.telegram.verify();
+    if (verified.ok) bot.start();
+    return verified.ok
+      ? { ok: true, verified: true, botName: verified.botName ?? null }
+      : { ok: true, verified: false, error: verified.error };
+  });
 
-    const verified = await monitor.notifications.telegram.verify();
-    if (!verified.ok) {
-      return { ok: true, saved: true, verified: false, error: verified.error };
+  ipcMain.handle('secrets:saveLlm', (_event, payload: unknown) => {
+    const input = (payload ?? {}) as { provider?: unknown; apiKey?: unknown; baseUrl?: unknown };
+    const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+    const provider = input.provider === 'openai-compatible' ? 'openai-compatible' : 'anthropic';
+
+    if (!apiKey) return { ok: false, error: 'An API key is required.' };
+
+    try {
+      if (provider === 'anthropic') writeEnvValues({ ANTHROPIC_API_KEY: apiKey });
+      else {
+        writeEnvValues({
+          OPENAI_API_KEY: apiKey,
+          ...(typeof input.baseUrl === 'string' && input.baseUrl ? { OPENAI_BASE_URL: input.baseUrl.trim() } : {}),
+        });
+      }
+      // Re-create the provider so the new key takes effect immediately.
+      agent.applyConfig(loadConfig(true));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
     }
-    return { ok: true, saved: true, verified: true, botName: verified.botName ?? null };
   });
 
-  ipcMain.handle('notifications:test', async () => {
-    const outcome = await monitor.notifications.test();
-    return outcome;
-  });
+  ipcMain.handle('notifications:test', async () => agent.notifications.test());
 
+  // ------------------------------------------------------------------- push
   const push = (channel: string, payload: unknown): void => {
     const window = getWindow();
     if (window && !window.isDestroyed()) window.webContents.send(channel, payload);
   };
 
-  monitor.on('state', (state) => push('monitor:state', state));
-  monitor.on('event', (event) => push('monitor:event', event));
+  agent.on('state', (state) => push('agent:state', state));
+  agent.on('activity', (entry) => push('agent:activity', entry));
+  agent.on('task', () => push('agent:state', agent.dashboardState()));
+  agent.on('watcher', () => push('agent:state', agent.dashboardState()));
 
-  monitor.on('appointment-found', () => {
-    const window = getWindow();
-    if (!window || window.isDestroyed()) return;
-    if (window.isMinimized()) window.restore();
-    window.show();
-    window.focus();
-    window.flashFrame(true);
-  });
-
-  monitor.on('manual-action-required', () => {
+  const attention = (): void => {
     const window = getWindow();
     if (!window || window.isDestroyed()) return;
     if (window.isMinimized()) window.restore();
     window.show();
     window.flashFrame(true);
-  });
+  };
+
+  agent.on('needs-human', attention);
+  agent.on('needs-approval', attention);
+  agent.on('completed', () => push('agent:state', agent.dashboardState()));
 }
 
-/**
- * Zod's own message is a JSON dump. The dashboard shows one readable line, so
- * an invalid setting tells you which field and why.
- */
+/** Zod's own message is a JSON dump; the dashboard shows one readable line. */
 function describeValidationError(err: unknown): string {
   if (err instanceof ZodError) {
     const issue = err.issues[0];
     if (!issue) return 'That configuration is not valid.';
-    const field = issue.path.filter((p) => p !== 'bls' && p !== 'notifications').join('.');
+    const field = issue.path.join('.');
     return field ? `${field}: ${issue.message}` : issue.message;
   }
   return err instanceof Error ? err.message : String(err);

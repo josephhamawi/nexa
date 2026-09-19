@@ -1,8 +1,8 @@
 {
-  "name": "bls-spain-monitor",
+  "name": "nexa",
   "version": "1.0.0",
   "private": true,
-  "description": "Availability monitor for BLS Spain visa appointments \u2014 Lagos, Nigeria only. Notifies on availability; booking stays manual.",
+  "description": "Nexa is your AI operations agent. Tell it what you need, and it can research, monitor websites, execute browser workflows, manage recurring tasks, analyze information, and report results.",
   "author": {
     "name": "Rami Zoohbi",
     "email": "rami.zoohbi@gmail.com"
@@ -16,19 +16,16 @@
     "build": "tsc -p tsconfig.json && node scripts/copy-ui.mjs",
     "dev": "npm run build && electron dist/main/main.js",
     "start": "electron dist/main/main.js",
-    "login": "tsx src/cli/login.ts",
-    "monitor": "tsx src/cli/monitor.ts",
-    "check": "tsx src/cli/check.ts",
-    "diagnostics": "tsx src/cli/diagnostics.ts",
+    "agent": "tsx src/cli/agent.ts",
+    "doctor": "tsx src/cli/doctor.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:telegram": "tsx src/cli/testTelegram.ts",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "postinstall": "playwright install chromium",
     "icon": "node scripts/make-icon.mjs",
     "package": "npm run build && electron-builder --mac --publish never",
-    "package:dir": "npm run build && electron-builder --mac --dir --publish never"
+    "postinstall": "playwright install chromium"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
@@ -51,9 +48,9 @@
     "vitest": "^3.0.7"
   },
   "build": {
-    "appId": "com.ramizoohbi.blsspainlagos",
-    "productName": "BLS Spain Lagos Monitor",
-    "copyright": "Availability monitor. Booking is always completed manually by the user.",
+    "appId": "com.nexa.agent",
+    "productName": "Nexa",
+    "copyright": "Nexa. Local-first AI operations agent.",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -88,17 +85,13 @@
           ]
         }
       ],
-      "category": "public.app-category.utilities",
+      "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
       "identity": null,
-      "darkModeSupport": true,
-      "extendInfo": {
-        "LSUIElement": false,
-        "NSHighResolutionCapable": true
-      }
+      "darkModeSupport": true
     },
     "dmg": {
-      "title": "BLS Spain Lagos Monitor"
+      "title": "Nexa"
     },
     "win": {
       "target": [

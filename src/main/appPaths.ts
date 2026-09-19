@@ -30,9 +30,9 @@ if (app.isPackaged) {
     }
   }
 
-  process.env.BLS_DATA_DIR = dataDir;
-  process.env.BLS_CONFIG_PATH = configFile;
-  process.env.BLS_ENV_PATH = envFile;
+  process.env.NEXA_DATA_DIR = dataDir;
+  process.env.NEXA_CONFIG_PATH = configFile;
+  process.env.NEXA_ENV_PATH = envFile;
 }
 
 /** Where a packaged build keeps its editable files, for the UI to report. */

@@ -1,7 +1,7 @@
 /**
  * npm run test:telegram
  *
- * Verifies the bot credentials and sends one test message to your chat.
+ * Verifies the bot credentials and sends one test message.
  */
 import { ensureDataDirs, hasTelegramCredentials, loadConfig, loadEnv } from '../config/config';
 import { NotificationManager } from '../notifications/NotificationManager';
@@ -12,8 +12,8 @@ async function main(): Promise<void> {
   const config = loadConfig();
 
   if (!hasTelegramCredentials()) {
-    console.error('✗ TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID are not set in .env');
-    console.error('  Copy .env.example to .env and fill both values.');
+    console.error('TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID are not set in .env');
+    console.error('Copy .env.example to .env and fill both, or use Settings in the app.');
     process.exit(1);
   }
 
@@ -21,21 +21,19 @@ async function main(): Promise<void> {
 
   const verified = await notifications.telegram.verify();
   if (!verified.ok) {
-    console.error(`✗ Could not verify the bot: ${verified.error}`);
+    console.error(`Could not verify the bot: ${verified.error}`);
     process.exit(1);
   }
-  console.log(`✓ Bot verified${verified.botName ? ` (@${verified.botName})` : ''}`);
+  console.log(`Bot verified${verified.botName ? ` (@${verified.botName})` : ''}`);
 
   const outcome = await notifications.test();
-  if (outcome.telegram.ok) {
-    console.log('✓ Test message sent. Check your Telegram chat.');
-  } else {
-    console.error(`✗ Telegram send failed: ${outcome.telegram.error}`);
+  if (!outcome.telegram.ok) {
+    console.error(`Telegram send failed: ${outcome.telegram.error}`);
     process.exit(1);
   }
 
-  console.log(`  Desktop notification: ${outcome.desktop ? '✓ sent' : '✗ not sent'}`);
-  console.log(`  Sound: ${outcome.sound ? '✓ played' : '✗ not played'}`);
+  console.log('Test message sent. Check your Telegram chat.');
+  console.log(`Desktop: ${outcome.desktop ? 'sent' : 'not sent'}   Sound: ${outcome.sound ? 'played' : 'not played'}`);
   process.exit(0);
 }
 

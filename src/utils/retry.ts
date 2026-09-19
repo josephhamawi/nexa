@@ -14,7 +14,7 @@ export interface RetryOptions {
 /**
  * Retries a transient operation. Deliberately conservative: three attempts by
  * default, with backoff, so a flaky page load does not turn into a burst of
- * requests at the BLS portal.
+ * requests at the target site.
  */
 export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
   const {

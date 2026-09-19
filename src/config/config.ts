@@ -3,9 +3,11 @@ import path from 'node:path';
 import dotenv from 'dotenv';
 import { AppConfigSchema, EnvSchema, type AppConfig, type Env } from './schema';
 
+export type { AppConfig, Env } from './schema';
+
 /**
- * Resolves the project root by walking up from this file until a package.json
- * is found. Works from src/ (tsx), dist/ (tsc output) and from Electron, where
+ * Resolves the project root by walking up until a package.json is found.
+ * Works from src/ (tsx), dist/ (tsc output) and from Electron, where
  * process.cwd() is not reliable.
  */
 function findProjectRoot(): string {
@@ -22,13 +24,13 @@ function findProjectRoot(): string {
 export const PROJECT_ROOT = findProjectRoot();
 
 /**
- * A packaged Electron build cannot write inside its own bundle, so
- * src/main/appPaths.ts points these at the userData directory before anything
- * else loads. Getters (not constants) are what make that late override work.
+ * A packaged build cannot write inside its own bundle, so main/appPaths.ts
+ * points these at the userData directory before anything else loads. Getters
+ * (not constants) are what make that late override work.
  */
 function dataRoot(): string {
-  return process.env.BLS_DATA_DIR
-    ? path.resolve(process.env.BLS_DATA_DIR)
+  return process.env.NEXA_DATA_DIR
+    ? path.resolve(process.env.NEXA_DATA_DIR)
     : path.join(PROJECT_ROOT, 'data');
 }
 
@@ -37,27 +39,28 @@ export const paths = {
     return PROJECT_ROOT;
   },
   get config(): string {
-    return process.env.BLS_CONFIG_PATH
-      ? path.resolve(process.env.BLS_CONFIG_PATH)
+    return process.env.NEXA_CONFIG_PATH
+      ? path.resolve(process.env.NEXA_CONFIG_PATH)
       : path.join(PROJECT_ROOT, 'config.json');
   },
-  /** Template shipped in the repository. config.json itself is gitignored. */
   get configExample(): string {
     return path.join(PROJECT_ROOT, 'config.example.json');
   },
   get env(): string {
-    return process.env.BLS_ENV_PATH
-      ? path.resolve(process.env.BLS_ENV_PATH)
+    return process.env.NEXA_ENV_PATH
+      ? path.resolve(process.env.NEXA_ENV_PATH)
       : path.join(PROJECT_ROOT, '.env');
   },
   get data(): string {
     return dataRoot();
   },
-  get session(): string {
-    return path.join(dataRoot(), 'sessions', 'bls-spain-lagos');
+  /** One persistent browser profile directory per configured profile. */
+  get profiles(): string {
+    return path.join(dataRoot(), 'profiles');
   },
-  get screenshots(): string {
-    return path.join(dataRoot(), 'screenshots', 'bls-spain-lagos');
+  /** Screenshots and extracted payloads that back up a task's claims. */
+  get evidence(): string {
+    return path.join(dataRoot(), 'evidence');
   },
   get logs(): string {
     return path.join(dataRoot(), 'logs');
@@ -65,16 +68,29 @@ export const paths = {
   get state(): string {
     return path.join(dataRoot(), 'state');
   },
-  get stateFile(): string {
-    return path.join(dataRoot(), 'state', 'monitor-state.json');
+  get tasksFile(): string {
+    return path.join(dataRoot(), 'state', 'tasks.json');
   },
-  get eventsFile(): string {
-    return path.join(dataRoot(), 'state', 'events.jsonl');
+  get watchersFile(): string {
+    return path.join(dataRoot(), 'state', 'watchers.json');
+  },
+  get memoryFile(): string {
+    return path.join(dataRoot(), 'state', 'memory.json');
+  },
+  get telegramOffsetFile(): string {
+    return path.join(dataRoot(), 'state', 'telegram-offset.json');
+  },
+  get activityFile(): string {
+    return path.join(dataRoot(), 'state', 'activity.jsonl');
   },
 };
 
+export function profileDirectory(profileId: string): string {
+  return path.join(paths.profiles, profileId.replace(/[^a-z0-9_-]/gi, '_'));
+}
+
 export function ensureDataDirs(): void {
-  for (const dir of [paths.data, paths.session, paths.screenshots, paths.logs, paths.state]) {
+  for (const dir of [paths.data, paths.profiles, paths.evidence, paths.logs, paths.state]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }
@@ -92,66 +108,14 @@ export function loadEnv(): Env {
   return cachedEnv;
 }
 
-let cachedConfig: AppConfig | null = null;
-
-export function loadConfig(force = false): AppConfig {
-  if (cachedConfig && !force) return cachedConfig;
-
-  // A fresh clone has no config.json (it holds your own visa details and is
-  // gitignored), so seed it from the template on first run.
-  if (!fs.existsSync(paths.config) && fs.existsSync(paths.configExample)) {
-    try {
-      fs.copyFileSync(paths.configExample, paths.config);
-    } catch {
-      // Not fatal: every field in the schema has a default.
-    }
-  }
-
-  let raw: unknown = {};
-  if (fs.existsSync(paths.config)) {
-    const text = fs.readFileSync(paths.config, 'utf8');
-    try {
-      raw = JSON.parse(text);
-    } catch (err) {
-      throw new Error(`config.json is not valid JSON: ${(err as Error).message}`);
-    }
-  }
-  const parsed = AppConfigSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new Error(`Invalid config.json:\n${formatZodError(parsed.error.issues)}`);
-  }
-  cachedConfig = parsed.data;
-  return cachedConfig;
-}
-
-export function saveConfig(next: AppConfig): AppConfig {
-  const parsed = AppConfigSchema.parse(next);
-  fs.writeFileSync(paths.config, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
-  cachedConfig = parsed;
-  return parsed;
-}
-
-function formatZodError(issues: { path: (string | number | symbol)[]; message: string }[]): string {
-  return issues.map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`).join('\n');
-}
-
-export function hasTelegramCredentials(env: Env = loadEnv()): boolean {
-  return Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID);
-}
-
-/** Drops the cache so the next loadEnv() re-reads the file. */
 export function reloadEnv(): Env {
   cachedEnv = null;
   return loadEnv();
 }
 
 /**
- * Writes Telegram credentials to the .env file, preserving any other keys and
- * comments already in it.
- *
- * These are bot credentials the user creates for themselves, not a BLS login:
- * the application needs them to send you messages. They are written with
- * owner-only permissions and are never logged or echoed back to the UI.
+ * Writes secrets to the .env file, preserving other keys and comments.
+ * Owner-only permissions; values are never logged or echoed back to the UI.
  */
 export function writeEnvValues(values: Record<string, string>): void {
   const file = paths.env;
@@ -174,7 +138,63 @@ export function writeEnvValues(values: Record<string, string>): void {
   const body = `${updated.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()}\n`;
   fs.writeFileSync(file, body, { encoding: 'utf8', mode: 0o600 });
 
-  // Keep the running process in step with what was just written.
   for (const [key, value] of Object.entries(values)) process.env[key] = value;
   reloadEnv();
+}
+
+let cachedConfig: AppConfig | null = null;
+
+export function loadConfig(force = false): AppConfig {
+  if (cachedConfig && !force) return cachedConfig;
+
+  // A fresh clone has no config.json (it holds your own preferences and is
+  // gitignored), so seed it from the template on first run.
+  if (!fs.existsSync(paths.config) && fs.existsSync(paths.configExample)) {
+    try {
+      fs.copyFileSync(paths.configExample, paths.config);
+    } catch {
+      // Not fatal: every field in the schema has a default.
+    }
+  }
+
+  let raw: unknown = {};
+  if (fs.existsSync(paths.config)) {
+    const text = fs.readFileSync(paths.config, 'utf8');
+    try {
+      raw = JSON.parse(text);
+    } catch (err) {
+      throw new Error(`config.json is not valid JSON: ${(err as Error).message}`);
+    }
+  }
+
+  const parsed = AppConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(`Invalid config.json:\n${formatZodError(parsed.error.issues)}`);
+  }
+  cachedConfig = parsed.data;
+  return cachedConfig;
+}
+
+export function saveConfig(next: AppConfig): AppConfig {
+  const parsed = AppConfigSchema.parse(next);
+  ensureDataDirs();
+  fs.writeFileSync(paths.config, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+  cachedConfig = parsed;
+  return parsed;
+}
+
+function formatZodError(issues: { path: (string | number | symbol)[]; message: string }[]): string {
+  return issues.map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`).join('\n');
+}
+
+export function hasTelegramCredentials(env: Env = loadEnv()): boolean {
+  return Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID);
+}
+
+export function hasLlmCredentials(config: AppConfig = loadConfig(), env: Env = loadEnv()): boolean {
+  if (config.llm.provider === 'anthropic') return Boolean(env.ANTHROPIC_API_KEY);
+  if (config.llm.provider === 'openai-compatible') {
+    return Boolean(env.OPENAI_API_KEY || config.llm.baseUrl || env.OPENAI_BASE_URL);
+  }
+  return false;
 }

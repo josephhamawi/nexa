@@ -1,7 +1,7 @@
 /**
- * Randomised polling intervals. The point is politeness towards BLS, not
- * evasion: the floor is enforced high (see config schema) and the jitter just
- * keeps the monitor from hitting the site on a metronome.
+ * Randomised delays. The point is politeness towards the sites Nexa reads:
+ * jitter keeps repeated checks off a metronome, and the floor is enforced in
+ * configuration rather than here.
  */
 export function randomIntBetween(minInclusive: number, maxInclusive: number): number {
   if (maxInclusive < minInclusive) {

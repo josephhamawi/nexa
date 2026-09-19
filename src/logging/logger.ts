@@ -37,6 +37,11 @@ const REDACTED_KEYS = [
   'cvv',
   'telegramBotToken',
   'TELEGRAM_BOT_TOKEN',
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'apiKey',
+  'api_key',
+  'secret',
 ];
 
 const redactPaths = REDACTED_KEYS.flatMap((key) => [key, `*.${key}`, `*.*.${key}`]);
@@ -45,7 +50,7 @@ function buildLogger(): Logger {
   const env = loadEnv();
   ensureDataDirs();
 
-  const logFile = path.join(paths.logs, 'monitor.log');
+  const logFile = path.join(paths.logs, 'nexa.log');
   const fileStream = fs.createWriteStream(logFile, { flags: 'a' });
 
   const streams: pino.StreamEntry[] = [
@@ -56,7 +61,7 @@ function buildLogger(): Logger {
   return pino(
     {
       level: env.LOG_LEVEL,
-      base: { app: 'bls-spain-lagos' },
+      base: { app: 'nexa' },
       redact: { paths: redactPaths, censor: '[redacted]' },
       timestamp: pino.stdTimeFunctions.isoTime,
     },

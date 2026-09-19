@@ -1,24 +1,55 @@
 {
-  "bls": {
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-5",
+    "maxOutputTokens": 4096,
+    "temperature": 0.2,
+    "baseUrl": ""
+  },
+  "telegram": {
     "enabled": true,
-    "country": "Spain",
-    "applicationCountry": "Nigeria",
-    "city": "Lagos",
-    "centre": "Lagos",
-    "visaType": "Schengen Visa/ Short Term Visa",
-    "visaSubCategory": "Tourist Visa",
-    "applicantType": "Individual",
-    "memberCount": 1,
-    "preferredDateFrom": "",
-    "preferredDateTo": "",
-    "preferredTimeFrom": "",
-    "preferredTimeTo": "",
-    "intervalMinSeconds": 180,
-    "intervalMaxSeconds": 360
+    "pollSeconds": 3,
+    "allowedChatIds": []
+  },
+  "agent": {
+    "maxConcurrentTasks": 1,
+    "maxStepRetries": 2,
+    "minWatchIntervalSeconds": 300,
+    "requireApprovalForWrites": true,
+    "demoMode": false
+  },
+  "files": {
+    "allowedDirectories": [],
+    "maxFileSizeMb": 25
   },
   "notifications": {
     "telegram": true,
     "desktop": true,
-    "sound": true
-  }
+    "sound": true,
+    "dailyBriefAt": ""
+  },
+  "userProfile": {
+    "name": "",
+    "summary": "",
+    "skills": [],
+    "technologies": [],
+    "preferredRoles": [],
+    "excludedRoles": [],
+    "industries": [],
+    "locations": [],
+    "remotePreference": "remote",
+    "salaryMin": 0,
+    "salaryCurrency": "USD",
+    "interests": []
+  },
+  "browserProfiles": [
+    {
+      "id": "default",
+      "name": "Default",
+      "engine": "chromium",
+      "headless": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "lastUsed": null
+    }
+  ]
 }

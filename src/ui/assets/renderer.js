@@ -1,21 +1,16 @@
-/* Dashboard renderer.
+/* Nexa Control Center renderer.
 
    Runs with context isolation on; the only bridge to the main process is
-   window.bls, defined in preload.ts. No Node access, no remote module. */
+   window.nexa, defined in preload.ts. No Node, no direct filesystem access. */
 
 const $ = (id) => document.getElementById(id);
 
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-
-let latest = null;
-let cooldownTimer = null;
+let state = null;
+let config = null;
 
 /* ── Theme: light by default, dark and system on request ─────────────────── */
 
-const THEME_KEY = 'bls-theme-preference';
+const THEME_KEY = 'nexa-theme-preference';
 const systemQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
 function storedTheme() {
@@ -32,7 +27,7 @@ function applyTheme(choice) {
   try {
     localStorage.setItem(THEME_KEY, choice);
   } catch {
-    /* private mode: the theme simply resets next launch */
+    /* private mode: the theme resets next launch */
   }
   for (const button of document.querySelectorAll('[data-theme-choice]')) {
     button.setAttribute('aria-pressed', String(button.dataset.themeChoice === choice));
@@ -45,611 +40,609 @@ systemQuery.addEventListener('change', () => {
 
 applyTheme(storedTheme());
 
-/* ── Formatting ──────────────────────────────────────────────────────────── */
+/* ── Helpers ─────────────────────────────────────────────────────────────── */
 
-function formatDateLong(isoDate) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate || '');
-  if (!m) return isoDate || '-';
-  return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}`;
+const VIEW_SUBTITLES = {
+  overview: 'Your AI operations agent',
+  tasks: 'Everything Nexa is working on, and everything it has finished',
+  watchers: 'Pages and searches Nexa keeps an eye on',
+  approvals: 'Steps that need your say-so before they run',
+  activity: 'What the agent has actually been doing',
+  browser: 'Persistent browser sessions Nexa can drive',
+  settings: 'Provider, Telegram, your profile and safety',
+};
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
 }
 
 function clockOf(iso) {
   if (!iso) return '-';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '-' : d.toLocaleTimeString([], { hour12: false });
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleTimeString([], { hour12: false });
 }
 
-function dayOf(iso) {
+function whenOf(iso) {
   if (!iso) return '-';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '-';
-  return formatDateLong(
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
-  );
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '-';
+  const delta = date.getTime() - Date.now();
+  const minutes = Math.round(Math.abs(delta) / 60000);
+  if (minutes < 1) return delta > 0 ? 'in under a minute' : 'just now';
+  if (minutes < 60) return delta > 0 ? `in ${minutes}m` : `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return delta > 0 ? `in ${hours}h` : `${hours}h ago`;
+  return date.toLocaleString();
 }
 
-function relativeFrom(iso) {
-  if (!iso) return '-';
-  const delta = new Date(iso).getTime() - Date.now();
-  if (Number.isNaN(delta)) return '-';
-  if (delta <= 0) return 'due now';
-  const minutes = Math.floor(delta / 60000);
-  const seconds = Math.round((delta % 60000) / 1000);
-  return minutes > 0 ? `in ${minutes}m ${String(seconds).padStart(2, '0')}s` : `in ${seconds}s`;
-}
-
-function titleCase(status) {
-  return status
-    .split('_')
-    .map((word) => word.charAt(0) + word.slice(1).toLowerCase())
-    .join(' ');
-}
-
-function dotClassFor(state) {
-  switch (state.status) {
-    case 'AVAILABLE':
-      return 'found';
-    case 'MONITORING':
+function statusClass(status) {
+  switch (status) {
+    case 'RUNNING':
       return 'running';
-    case 'NOT_AVAILABLE':
-      return state.runState === 'RUNNING' ? 'running' : 'idle';
-    case 'CAPTCHA_REQUIRED':
-    case 'HUMAN_VERIFICATION_REQUIRED':
-    case 'LOGIN_REQUIRED':
-    case 'SESSION_EXPIRED':
+    case 'COMPLETED':
+      return 'completed';
+    case 'FAILED':
+      return 'failed';
+    case 'WAITING_FOR_HUMAN':
+    case 'WAITING_FOR_APPROVAL':
+      return 'waiting';
     case 'PAUSED':
-      return 'warn';
-    case 'ERROR':
-    case 'SITE_UNAVAILABLE':
-      return 'error';
+      return 'paused';
+    case 'CANCELLED':
+      return 'cancelled';
     default:
-      return 'idle';
+      return '';
   }
 }
 
-function setTag(el, text, tone) {
-  el.textContent = text;
-  el.className = `tag ${tone}`;
+function prettyStatus(status) {
+  return status.replace(/_/g, ' ').toLowerCase();
 }
 
-/* ── Render ──────────────────────────────────────────────────────────────── */
+/* ── Rendering ───────────────────────────────────────────────────────────── */
 
-function render(state) {
-  if (!state) return;
-  latest = state;
+function render(next) {
+  if (!next) return;
+  state = next;
 
-  const identity = state.identity;
-  $('visa-type').textContent = identity.visaSubCategory
-    ? `${identity.visaType}, ${identity.visaSubCategory}`
-    : identity.visaType;
-  $('applicant-summary').textContent =
-    identity.applicantType === 'Individual'
-      ? 'Individual applicant'
-      : `${identity.applicantType} of ${identity.memberCount}`;
-  $('status-label').textContent = titleCase(state.status);
-  $('status-dot').className = `dot ${dotClassFor(state)}`;
-  $('availability-message').textContent = state.availabilityMessage;
+  $('stat-active').textContent = state.counts.activeTasks;
+  $('stat-watchers').textContent = state.counts.runningWatchers;
+  $('stat-waiting').textContent = state.counts.waitingForHuman + state.counts.pendingApprovals;
+  $('stat-done').textContent = state.counts.completedToday;
+  $('stat-failed').textContent = state.counts.failedToday;
 
-  $('last-check').textContent = clockOf(state.lastCheck);
-  $('last-check-date').textContent = state.lastCheck ? dayOf(state.lastCheck) : 'not yet run';
-  $('next-check').textContent = state.nextCheck ? clockOf(state.nextCheck) : '-';
-  $('next-check-in').textContent = state.nextCheck ? relativeFrom(state.nextCheck) : 'not scheduled';
-  $('interval').textContent = `${Math.round(state.intervalRange.minSeconds / 60)}-${Math.round(
-    state.intervalRange.maxSeconds / 60,
-  )} min`;
-  $('backoff-note').textContent =
-    state.intervalRange.tier === 'normal'
-      ? ''
-      : `Error backoff active (${state.intervalRange.tier}) after ${state.errorCount} error${
-          state.errorCount === 1 ? '' : 's'
-        }.`;
+  setPill('pill-tasks', state.counts.activeTasks);
+  setPill('pill-watchers', state.counts.runningWatchers);
+  setPill('pill-approvals', state.counts.waitingForHuman + state.counts.pendingApprovals);
 
-  $('stat-checks').textContent = state.stats.checksToday;
-  $('stat-found').textContent = state.stats.appointmentsFound;
-  $('stat-errors').textContent = state.stats.errorsToday;
+  const busy = state.tasks.some((task) => task.status === 'RUNNING');
+  const waiting = state.counts.waitingForHuman + state.counts.pendingApprovals > 0;
+  $('agent-dot').className = `dot ${waiting ? 'warn' : busy ? 'busy' : state.agent.running ? 'running' : ''}`;
+  $('agent-state-label').textContent = waiting
+    ? 'needs you'
+    : busy
+      ? 'working'
+      : state.agent.running
+        ? 'idle'
+        : 'stopped';
 
-  if (state.sessionStatus === 'AUTHENTICATED') setTag($('session-status'), 'Authenticated', 'ok');
-  else if (state.sessionStatus === 'LOGIN_REQUIRED') setTag($('session-status'), 'Login required', 'warn');
-  else setTag($('session-status'), 'Unknown', 'neutral');
+  const llm = $('llm-badge');
+  llm.textContent = state.agent.llm.available
+    ? `model: ${state.agent.llm.model}`
+    : 'model: rules only';
+  llm.className = `meta ${state.agent.llm.available ? 'ok' : 'warn'}`;
 
-  if (state.browserInUse) setTag($('browser-status'), 'In use by you', 'warn');
-  else setTag($('browser-status'), state.browserOpen ? 'Open' : 'Closed', state.browserOpen ? 'ok' : 'neutral');
+  const telegram = $('telegram-badge');
+  const tg = state.notifications.telegram;
+  telegram.textContent = `telegram: ${tg === 'connected' ? 'connected' : tg === 'disabled' ? 'off' : 'not set up'}`;
+  telegram.className = `meta ${tg === 'connected' ? 'ok' : 'warn'}`;
 
-  const telegram = state.notifications.telegram;
-  setTag(
-    $('ch-telegram'),
-    telegram === 'connected' ? 'Connected' : telegram === 'disabled' ? 'Disabled' : 'Not configured',
-    telegram === 'connected' ? 'ok' : telegram === 'disabled' ? 'off' : 'warn',
-  );
-  setTag(
-    $('ch-desktop'),
-    state.notifications.desktop === 'enabled' ? 'Enabled' : 'Disabled',
-    state.notifications.desktop === 'enabled' ? 'ok' : 'off',
-  );
-  setTag(
-    $('ch-sound'),
-    state.notifications.sound === 'enabled' ? 'Enabled' : 'Disabled',
-    state.notifications.sound === 'enabled' ? 'ok' : 'off',
-  );
-
-  $('pref-date-from').textContent = state.preferences.preferredDateFrom || 'any';
-  $('pref-date-to').textContent = state.preferences.preferredDateTo || 'any';
-  $('pref-time-from').textContent = state.preferences.preferredTimeFrom || 'any';
-  $('pref-time-to').textContent = state.preferences.preferredTimeTo || 'any';
-
-  const toggle = $('btn-toggle');
-  if (state.runState === 'RUNNING') toggle.textContent = 'Pause';
-  else if (state.manualActionRequired || state.runState === 'PAUSED') toggle.textContent = 'Resume monitoring';
-  else toggle.textContent = 'Start';
-
-  renderAlert(state);
-  updateCooldown(state.cooldownRemainingSeconds);
-}
-
-function renderAlert(state) {
-  const panel = $('alert-panel');
-  const manual = state.manualActionRequired;
-  const found = state.status === 'AVAILABLE' && state.appointments.length > 0;
-
-  if (!manual && !found) {
-    panel.classList.add('hidden');
-    return;
+  if (state.agent.demoMode) {
+    $('view-subtitle').textContent = 'Demo mode: results are simulated and nothing is contacted';
   }
 
-  panel.classList.remove('hidden');
-  panel.classList.toggle('manual', manual && !found);
-  $('alert-visa').textContent = state.identity.visaSubCategory
-    ? `${state.identity.visaType}, ${state.identity.visaSubCategory}`
-    : state.identity.visaType;
-  $('alert-detected').textContent = clockOf(state.lastCheck);
-  $('alert-view-screenshot').classList.toggle('hidden', !state.screenshotPath);
+  renderTaskList($('overview-tasks'), state.tasks.slice(0, 4), $('overview-tasks-empty'));
+  renderTaskList($('tasks-active'), state.tasks, $('tasks-active-empty'));
+  renderTaskList($('tasks-history'), state.history, $('tasks-history-empty'), true);
+  renderWatchers();
+  renderApprovals();
+  renderBrowser();
+}
 
-  if (found) {
-    const slot = state.appointments[0];
-    $('alert-title').textContent = 'Appointment available';
-    $('alert-badge').textContent = 'Monitoring stopped';
-    $('alert-date').textContent = formatDateLong(slot.date);
-    $('alert-time').textContent = slot.time || '-';
-    $('alert-note').textContent =
-      'The browser has been left open on the appointment page. Complete the booking yourself. This application will not click a confirmation or a payment step.';
-    $('alert-resume').classList.add('hidden');
+function setPill(id, value) {
+  const pill = $(id);
+  pill.textContent = value;
+  pill.classList.toggle('zero', value === 0);
+}
 
-    const more = $('alert-more');
-    if (state.appointments.length > 1) {
-      more.classList.remove('hidden');
-      more.textContent = `Also visible: ${state.appointments
-        .slice(1, 9)
-        .map((s) => (s.time ? `${s.date} ${s.time}` : s.date))
-        .join('   ·   ')}`;
-    } else {
-      more.classList.add('hidden');
+function renderTaskList(container, tasks, emptyNode, compact = false) {
+  container.innerHTML = '';
+  if (emptyNode) emptyNode.classList.toggle('hidden', tasks.length > 0);
+
+  for (const task of tasks) {
+    const record = el('div', 'record');
+
+    const head = el('div', 'record-head');
+    head.append(el('span', 'record-title', task.name));
+    head.append(el('span', `status ${statusClass(task.status)}`, prettyStatus(task.status)));
+    record.append(head);
+
+    const bits = [];
+    if (task.recurrence && task.recurrence.kind !== 'once') bits.push(describeRecurrence(task.recurrence));
+    if (task.nextRun && task.status !== 'COMPLETED') bits.push(`next ${whenOf(task.nextRun)}`);
+    if (task.lastRun) bits.push(`last ${whenOf(task.lastRun)}`);
+    record.append(el('div', 'record-sub', bits.join('  ·  ') || task.description || task.naturalLanguageRequest));
+
+    if (!compact && task.steps.length > 0) {
+      const bar = el('div', 'progress');
+      const fill = el('span');
+      fill.style.width = `${task.progress}%`;
+      bar.append(fill);
+      record.append(bar);
+
+      const steps = el('div', 'steps-inline');
+      for (const [index, step] of task.steps.entries()) {
+        const mark = step.status === 'DONE' ? '✓' : step.status === 'FAILED' ? '✕' : step.status === 'RUNNING' ? '▶' : '·';
+        const cls = step.status === 'DONE' ? 'done' : step.status === 'FAILED' ? 'failed' : step.status === 'RUNNING' ? 'active' : '';
+        steps.append(el('div', cls, `${mark} ${index + 1}. ${step.description}`));
+      }
+      record.append(steps);
     }
-    return;
-  }
 
-  const isCaptcha =
-    state.status === 'CAPTCHA_REQUIRED' || state.status === 'HUMAN_VERIFICATION_REQUIRED';
-  const isLogin = state.status === 'LOGIN_REQUIRED' || state.status === 'SESSION_EXPIRED';
-
-  $('alert-title').textContent = isCaptcha
-    ? 'Manual verification required'
-    : isLogin
-      ? 'Login required'
-      : 'Manual action required';
-  $('alert-badge').textContent = 'Monitoring paused';
-  $('alert-date').textContent = '-';
-  $('alert-time').textContent = '-';
-  $('alert-more').classList.add('hidden');
-  $('alert-note').textContent = `${state.manualActionReason || state.availabilityMessage}\n\nComplete the step yourself in the Chromium window. Monitoring resumes on its own once you are through, and nothing on the verification is touched by this application.`;
-  $('alert-resume').classList.remove('hidden');
-}
-
-function addEventRow(event, prepend = true) {
-  const list = $('event-log');
-  const li = document.createElement('li');
-  li.className = event.level;
-
-  const time = document.createElement('span');
-  time.className = 'time';
-  time.textContent = event.clock;
-
-  const message = document.createElement('span');
-  message.className = 'message';
-  message.textContent = event.message;
-
-  li.append(time, message);
-  if (prepend) list.prepend(li);
-  else list.append(li);
-
-  $('log-empty').classList.add('hidden');
-  while (list.children.length > 200) list.lastElementChild.remove();
-}
-
-function toast(text, ms = 4500) {
-  const el = $('toast');
-  el.textContent = text;
-  if (text) {
-    setTimeout(() => {
-      if (el.textContent === text) el.textContent = '';
-    }, ms);
-  }
-}
-
-function updateCooldown(remaining) {
-  const button = $('btn-check-now');
-  if (cooldownTimer) {
-    clearInterval(cooldownTimer);
-    cooldownTimer = null;
-  }
-  if (!remaining || remaining <= 0) {
-    button.disabled = false;
-    button.textContent = 'Check now';
-    return;
-  }
-
-  let left = remaining;
-  button.disabled = true;
-  button.textContent = `Check now · ${left}s`;
-  cooldownTimer = setInterval(() => {
-    left -= 1;
-    if (left <= 0) {
-      clearInterval(cooldownTimer);
-      cooldownTimer = null;
-      button.disabled = false;
-      button.textContent = 'Check now';
-      return;
+    if (task.result) {
+      record.append(el('div', 'record-sub', task.result.slice(0, 400)));
     }
-    button.textContent = `Check now · ${left}s`;
-  }, 1000);
-}
 
-function tickClock() {
-  $('clock').textContent = new Date().toLocaleTimeString([], { hour12: false });
-  if (latest?.nextCheck) $('next-check-in').textContent = relativeFrom(latest.nextCheck);
-}
+    const actions = el('div', 'record-actions');
+    if (task.status === 'WAITING_FOR_APPROVAL') {
+      actions.append(button('Approve', 'btn btn-sm btn-solid', () => call(window.nexa.approveTask(task.id, true))));
+      actions.append(button('Reject', 'btn btn-sm btn-danger', () => call(window.nexa.approveTask(task.id, false))));
+    } else if (task.status === 'WAITING_FOR_HUMAN') {
+      actions.append(button('Open browser', 'btn btn-sm btn-solid', () => call(window.nexa.openBrowser())));
+      actions.append(button('Resume', 'btn btn-sm', () => call(window.nexa.resumeTask(task.id))));
+    } else if (task.status === 'PAUSED') {
+      actions.append(button('Resume', 'btn btn-sm', () => call(window.nexa.resumeTask(task.id))));
+    } else if (task.status === 'RUNNING' || task.status === 'QUEUED') {
+      actions.append(button('Pause', 'btn btn-sm btn-quiet', () => call(window.nexa.pauseTask(task.id))));
+    } else if (task.status === 'COMPLETED' || task.status === 'FAILED') {
+      actions.append(button('Run again', 'btn btn-sm btn-quiet', () => call(window.nexa.runTask(task.id))));
+    }
 
-/* ── Application details form ────────────────────────────────────────────── */
+    if (task.evidence && task.evidence.length > 0) {
+      const withFile = task.evidence.filter((item) => item.path);
+      if (withFile.length > 0) {
+        actions.append(
+          button(`Evidence (${withFile.length})`, 'btn btn-sm btn-quiet', async () => {
+            const res = await window.nexa.openEvidence(withFile[withFile.length - 1].path);
+            if (!res.ok) reply(res.error || 'Could not open that evidence file.');
+          }),
+        );
+      }
+    }
 
-const FIELDS = {
-  visaType: 'f-visa-type',
-  visaSubCategory: 'f-visa-subcategory',
-  applicantType: 'f-applicant-type',
-  memberCount: 'f-member-count',
-  preferredDateFrom: 'f-date-from',
-  preferredDateTo: 'f-date-to',
-  preferredTimeFrom: 'f-time-from',
-  preferredTimeTo: 'f-time-to',
-  intervalMinSeconds: 'f-interval-min',
-  intervalMaxSeconds: 'f-interval-max',
-};
+    if (!['COMPLETED', 'FAILED', 'CANCELLED'].includes(task.status)) {
+      actions.append(button('Cancel', 'btn btn-sm btn-quiet btn-danger', () => call(window.nexa.cancelTask(task.id))));
+    }
 
-const CUSTOM = '__custom__';
-const NONE = '';
-let options = null;
-
-/** Builds a select, keeping the saved value selectable even if unknown. */
-function renderSelect(select, values, selected, { allowNone = false, noneLabel = 'None' } = {}) {
-  select.innerHTML = '';
-  if (allowNone) select.append(new Option(noneLabel, NONE));
-  for (const value of values) select.append(new Option(value, value));
-  select.append(new Option('Custom...', CUSTOM));
-
-  if (selected && !values.some((v) => v === selected)) {
-    // A saved wording the lists do not know about: keep it, as Custom.
-    select.value = CUSTOM;
-    return CUSTOM;
-  }
-  select.value = selected || (allowNone ? NONE : values[0] || CUSTOM);
-  return select.value;
-}
-
-/** Shows the free-text box only when Custom is chosen. */
-function syncCustom(selectId) {
-  const select = $(selectId);
-  const custom = $(`${selectId}-custom`);
-  if (!custom) return;
-  const isCustom = select.value === CUSTOM;
-  custom.classList.toggle('hidden', !isCustom);
-  if (isCustom) custom.focus({ preventScroll: true });
-}
-
-function readSelect(selectId) {
-  const select = $(selectId);
-  if (select.value !== CUSTOM) return select.value;
-  return ($(`${selectId}-custom`)?.value ?? '').trim();
-}
-
-function renderVisaSelects(config) {
-  if (!options) return;
-  const type = config.bls.visaType ?? '';
-  const chosen = renderSelect($('f-visa-type'), options.visaTypes, type);
-  if (chosen === CUSTOM) $('f-visa-type-custom').value = type;
-  syncCustom('f-visa-type');
-  renderCategorySelect(config.bls.visaSubCategory ?? '');
-}
-
-function renderCategorySelect(selected) {
-  if (!options) return;
-  const type = readSelect('f-visa-type');
-  const list = options.subCategories[type] ?? [];
-  const chosen = renderSelect($('f-visa-subcategory'), list, selected, {
-    allowNone: true,
-    noneLabel: 'None (form asks once)',
-  });
-  if (chosen === CUSTOM) $('f-visa-subcategory-custom').value = selected;
-  syncCustom('f-visa-subcategory');
-}
-
-function renderOptionsSource() {
-  if (!options) return;
-  const note = $('options-source');
-  if (options.fromLiveForm && options.discoveredAt) {
-    const when = new Date(options.discoveredAt);
-    note.textContent = `Choices below were read from your BLS booking form on ${dayOf(
-      options.discoveredAt,
-    )} at ${clockOf(options.discoveredAt)}. Centres offered: ${options.locations.join(', ')}.`;
-    note.classList.add('live');
-    if (Number.isNaN(when.getTime())) note.classList.remove('live');
-  } else {
-    note.textContent =
-      'Choices below are the published BLS categories. Sign in, then press Load lists from BLS to replace them with exactly what your account is offered.';
-    note.classList.remove('live');
+    if (actions.children.length > 0) record.append(actions);
+    container.append(record);
   }
 }
 
-function fillForm(config) {
-  for (const [key, id] of Object.entries(FIELDS)) {
-    if (id === 'f-visa-type' || id === 'f-visa-subcategory') continue;
-    const el = $(id);
-    if (el) el.value = config.bls[key] ?? '';
+function renderWatchers() {
+  const container = $('watchers-list');
+  container.innerHTML = '';
+  $('watchers-empty').classList.toggle('hidden', state.watchers.length > 0);
+
+  for (const watcher of state.watchers) {
+    const record = el('div', 'record');
+
+    const head = el('div', 'record-head');
+    head.append(el('span', 'record-title', watcher.name));
+    head.append(el('span', `status ${watcher.status === 'ACTIVE' ? 'running' : watcher.status === 'ERROR' ? 'failed' : 'paused'}`, watcher.status.toLowerCase()));
+    record.append(head);
+
+    record.append(el('div', 'record-sub', watcher.target));
+    record.append(
+      el(
+        'div',
+        'record-sub',
+        [
+          `every ${Math.round(watcher.intervalSeconds / 60)}m`,
+          `checked ${whenOf(watcher.lastChecked)}`,
+          watcher.lastChanged ? `changed ${whenOf(watcher.lastChanged)}` : 'no change yet',
+          watcher.lastError ? `error: ${watcher.lastError}` : '',
+        ]
+          .filter(Boolean)
+          .join('  ·  '),
+      ),
+    );
+
+    if (watcher.changeSummary) record.append(el('div', 'record-sub', watcher.changeSummary.slice(0, 300)));
+
+    const actions = el('div', 'record-actions');
+    actions.append(button('Check now', 'btn btn-sm btn-quiet', () => call(window.nexa.checkWatcher(watcher.id))));
+    actions.append(
+      button(watcher.status === 'ACTIVE' ? 'Pause' : 'Resume', 'btn btn-sm', () =>
+        call(window.nexa.setWatcherStatus(watcher.id, watcher.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE')),
+      ),
+    );
+    actions.append(button('Delete', 'btn btn-sm btn-quiet btn-danger', () => call(window.nexa.removeWatcher(watcher.id))));
+    record.append(actions);
+
+    container.append(record);
   }
-  const applicantValues = options ? options.applicantTypes : ['Individual', 'Family', 'Group'];
-  renderSelect($('f-applicant-type'), applicantValues, config.bls.applicantType);
-  // The schema only accepts the three known values, so no Custom entry here.
-  const customOption = [...$('f-applicant-type').options].find((o) => o.value === CUSTOM);
-  customOption?.remove();
-  renderVisaSelects(config);
-  renderOptionsSource();
-  $('f-telegram').checked = Boolean(config.notifications.telegram);
-  $('f-desktop').checked = Boolean(config.notifications.desktop);
-  $('f-sound').checked = Boolean(config.notifications.sound);
-  syncMemberCount();
 }
 
-/** An Individual booking is always one applicant; the schema enforces it too. */
-function syncMemberCount() {
-  const individual = $('f-applicant-type').value === 'Individual';
-  const count = $('f-member-count');
-  count.disabled = individual;
-  count.min = individual ? '1' : '2';
-  if (individual) count.value = '1';
-  else if (Number(count.value) < 2) count.value = '2';
+function renderApprovals() {
+  const waiting = state.tasks.filter(
+    (task) => task.status === 'WAITING_FOR_APPROVAL' || task.status === 'WAITING_FOR_HUMAN',
+  );
+  $('approvals-empty').classList.toggle('hidden', waiting.length > 0);
+  renderTaskList($('approvals-list'), waiting, null);
 }
 
-function readForm() {
+function renderBrowser() {
+  const container = $('browser-list');
+  container.innerHTML = '';
+
+  for (const profile of state.browser.profiles) {
+    const record = el('div', 'record');
+    const head = el('div', 'record-head');
+    head.append(el('span', 'record-title', profile.name));
+    const active = state.browser.active.includes(profile.id);
+    head.append(
+      el('span', `status ${state.browser.inUseByHuman && active ? 'waiting' : active ? 'running' : ''}`,
+        state.browser.inUseByHuman && active ? 'in use by you' : active ? 'open' : 'closed'),
+    );
+    record.append(head);
+    record.append(el('div', 'record-sub', `${profile.engine}  ·  ${profile.headless ? 'headless' : 'windowed'}  ·  id ${profile.id}`));
+
+    const actions = el('div', 'record-actions');
+    actions.append(button('Open', 'btn btn-sm btn-quiet', () => call(window.nexa.openBrowser(profile.id))));
+    record.append(actions);
+    container.append(record);
+  }
+}
+
+function renderActivity(entries) {
+  for (const listId of ['overview-activity', 'activity-list']) {
+    const list = $(listId);
+    list.innerHTML = '';
+    const slice = listId === 'overview-activity' ? entries.slice(0, 12) : entries;
+    for (const entry of slice) list.append(activityRow(entry));
+  }
+  $('overview-activity-empty').classList.toggle('hidden', entries.length > 0);
+}
+
+function activityRow(entry) {
+  const li = el('li', entry.level);
+  li.append(el('span', 'time', entry.clock));
+  li.append(el('span', 'message', entry.message));
+  return li;
+}
+
+function prependActivity(entry) {
+  for (const listId of ['overview-activity', 'activity-list']) {
+    const list = $(listId);
+    list.prepend(activityRow(entry));
+    while (list.children.length > 200) list.lastElementChild.remove();
+  }
+  $('overview-activity-empty').classList.add('hidden');
+}
+
+function describeRecurrence(recurrence) {
+  switch (recurrence.kind) {
+    case 'interval': {
+      const seconds = recurrence.everySeconds || 3600;
+      return seconds % 3600 === 0 ? `every ${seconds / 3600}h` : `every ${Math.round(seconds / 60)}m`;
+    }
+    case 'daily':
+      return `daily at ${recurrence.at || '08:00'}`;
+    case 'weekly': {
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      return `every ${days[recurrence.weekday ?? 1]} at ${recurrence.at || '08:00'}`;
+    }
+    default:
+      return 'once';
+  }
+}
+
+function button(label, className, onClick) {
+  const node = el('button', className, label);
+  node.addEventListener('click', onClick);
+  return node;
+}
+
+async function call(promise) {
+  const next = await promise;
+  if (next && next.counts) render(next);
+}
+
+function reply(text) {
+  $('command-reply').textContent = text;
+}
+
+/* ── Settings ────────────────────────────────────────────────────────────── */
+
+function fillSettings(next) {
+  config = next;
+
+  $('f-llm-provider').value = config.llm.provider;
+  $('f-llm-model').value = config.llm.model;
+  $('f-llm-baseurl').value = config.llm.baseUrl || '';
+
+  $('f-summary').value = config.userProfile.summary || '';
+  $('f-skills').value = (config.userProfile.skills || []).join(', ');
+  $('f-technologies').value = (config.userProfile.technologies || []).join(', ');
+  $('f-roles').value = (config.userProfile.preferredRoles || []).join(', ');
+  $('f-excluded').value = (config.userProfile.excludedRoles || []).join(', ');
+  $('f-remote').value = config.userProfile.remotePreference || 'remote';
+  $('f-salary').value = config.userProfile.salaryMin || 0;
+
+  $('f-watch-interval').value = config.agent.minWatchIntervalSeconds;
+  $('f-retries').value = config.agent.maxStepRetries;
+  $('f-approval').checked = Boolean(config.agent.requireApprovalForWrites);
+  $('f-demo').checked = Boolean(config.agent.demoMode);
+
+  $('f-telegram-on').checked = Boolean(config.notifications.telegram);
+  $('f-desktop-on').checked = Boolean(config.notifications.desktop);
+  $('f-sound-on').checked = Boolean(config.notifications.sound);
+
+  renderFolders();
+}
+
+function renderFolders() {
+  const list = $('folder-list');
+  list.innerHTML = '';
+  const folders = config.files.allowedDirectories || [];
+
+  if (folders.length === 0) {
+    list.append(el('div', 'note', 'No folders allowed yet. File tasks stay disabled until you add one.'));
+  }
+
+  for (const folder of folders) {
+    const row = el('div', 'folder-row');
+    row.append(el('span', null, folder));
+    row.append(
+      button('Remove', 'btn btn-sm btn-quiet btn-danger', () => {
+        config.files.allowedDirectories = folders.filter((item) => item !== folder);
+        renderFolders();
+      }),
+    );
+    list.append(row);
+  }
+}
+
+function readSettings() {
+  const list = (value) =>
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
   return {
-    bls: {
-      visaType: readSelect('f-visa-type'),
-      visaSubCategory: readSelect('f-visa-subcategory'),
-      applicantType: $('f-applicant-type').value,
-      memberCount: Number($('f-member-count').value || 1),
-      preferredDateFrom: $('f-date-from').value,
-      preferredDateTo: $('f-date-to').value,
-      preferredTimeFrom: $('f-time-from').value,
-      preferredTimeTo: $('f-time-to').value,
-      intervalMinSeconds: Number($('f-interval-min').value || 180),
-      intervalMaxSeconds: Number($('f-interval-max').value || 360),
+    llm: {
+      provider: $('f-llm-provider').value,
+      model: $('f-llm-model').value.trim() || 'claude-sonnet-5',
+      baseUrl: $('f-llm-baseurl').value.trim(),
+    },
+    agent: {
+      minWatchIntervalSeconds: Number($('f-watch-interval').value || 300),
+      maxStepRetries: Number($('f-retries').value || 2),
+      requireApprovalForWrites: $('f-approval').checked,
+      demoMode: $('f-demo').checked,
     },
     notifications: {
-      telegram: $('f-telegram').checked,
-      desktop: $('f-desktop').checked,
-      sound: $('f-sound').checked,
+      telegram: $('f-telegram-on').checked,
+      desktop: $('f-desktop-on').checked,
+      sound: $('f-sound-on').checked,
+    },
+    files: { allowedDirectories: config.files.allowedDirectories || [] },
+    userProfile: {
+      summary: $('f-summary').value.trim(),
+      skills: list($('f-skills').value),
+      technologies: list($('f-technologies').value),
+      preferredRoles: list($('f-roles').value),
+      excludedRoles: list($('f-excluded').value),
+      remotePreference: $('f-remote').value,
+      salaryMin: Number($('f-salary').value || 0),
     },
   };
 }
 
-/** Turns a Zod error dump into the one line that matters. */
-function firstIssue(message) {
-  const line = String(message)
-    .split('\n')
-    .map((l) => l.trim())
-    .find((l) => l.startsWith('- '));
-  return line ? line.slice(2) : String(message).split('\n')[0];
-}
-
-function setFormStatus(text, tone = '') {
-  const el = $('settings-status');
-  el.textContent = text;
-  el.className = `form-status ${tone}`;
-  if (text && tone === 'ok') {
+function setStatus(id, text, tone = '') {
+  const node = $(id);
+  node.textContent = text;
+  node.className = `form-status ${tone}`;
+  if (tone === 'ok') {
     setTimeout(() => {
-      if (el.textContent === text) el.textContent = '';
+      if (node.textContent === text) node.textContent = '';
     }, 5000);
   }
 }
 
-/* Telegram setup */
-
-function setTelegramStatus(text, tone = '') {
-  const el = $('telegram-status');
-  el.textContent = text;
-  el.className = `form-status ${tone}`;
-}
-
-async function refreshTelegramState() {
-  const info = await window.bls.getTelegram();
-  $('f-chat-id').value = info.chatId || '';
-  $('f-bot-token').placeholder = info.tokenPresent
-    ? 'Saved. Type a new token only to replace it.'
-    : '123456789:AAE...';
-  $('token-state').textContent = info.tokenPresent
-    ? `A token is stored in ${info.envPath}. It is never shown again and never logged.`
-    : `Will be written to ${info.envPath} with owner-only permissions, and never logged.`;
-}
-
 /* ── Boot ────────────────────────────────────────────────────────────────── */
+
+function switchView(name) {
+  for (const item of document.querySelectorAll('.nav-item')) {
+    item.classList.toggle('active', item.dataset.view === name);
+  }
+  for (const view of document.querySelectorAll('.view')) {
+    view.classList.toggle('active', view.dataset.view === name);
+  }
+  $('view-title').textContent = name.charAt(0).toUpperCase() + name.slice(1);
+  $('view-subtitle').textContent = VIEW_SUBTITLES[name] || '';
+}
+
+async function submitCommand() {
+  const input = $('command-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  const send = $('command-send');
+  send.disabled = true;
+  send.textContent = 'Planning';
+  reply('Working out a plan...');
+
+  try {
+    const result = await window.nexa.request(text);
+    if (!result.ok) {
+      reply(result.error || 'That did not work.');
+    } else {
+      reply(result.text);
+      input.value = '';
+      if (result.state) render(result.state);
+    }
+  } finally {
+    send.disabled = false;
+    send.textContent = 'Run';
+  }
+}
 
 async function boot() {
   for (const button of document.querySelectorAll('[data-theme-choice]')) {
     button.addEventListener('click', () => applyTheme(button.dataset.themeChoice));
   }
+  for (const item of document.querySelectorAll('.nav-item')) {
+    item.addEventListener('click', () => switchView(item.dataset.view));
+  }
+  for (const chip of document.querySelectorAll('.chip')) {
+    chip.addEventListener('click', () => {
+      $('command-input').value = chip.dataset.suggest;
+      $('command-input').focus();
+    });
+  }
 
-  tickClock();
-  setInterval(tickClock, 1000);
+  const tick = () => {
+    $('clock').textContent = new Date().toLocaleTimeString([], { hour12: false });
+  };
+  tick();
+  setInterval(tick, 1000);
 
-  const [state, events, config, loadedOptions] = await Promise.all([
-    window.bls.getState(),
-    window.bls.getEvents(),
-    window.bls.getConfig(),
-    window.bls.getOptions(),
+  $('command-send').addEventListener('click', submitCommand);
+  $('command-input').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') submitCommand();
+  });
+
+  const [initialState, activity, initialConfig, secrets] = await Promise.all([
+    window.nexa.getState(),
+    window.nexa.getActivity(),
+    window.nexa.getConfig(),
+    window.nexa.getSecrets(),
   ]);
-  options = loadedOptions;
-  render(state);
-  fillForm(config);
-  await refreshTelegramState();
-  for (const event of events.slice().reverse()) addEventRow(event, true);
 
-  window.bls.onState(render);
-  window.bls.onEvent((event) => addEventRow(event, true));
+  render(initialState);
+  renderActivity(activity);
+  fillSettings(initialConfig);
+  applySecrets(secrets);
 
-  $('f-applicant-type').addEventListener('change', syncMemberCount);
+  window.nexa.onState(render);
+  window.nexa.onActivity(prependActivity);
 
-  $('f-visa-type').addEventListener('change', () => {
-    syncCustom('f-visa-type');
-    renderCategorySelect('');
-  });
-  $('f-visa-type-custom').addEventListener('input', () => renderCategorySelect(''));
-  $('f-visa-subcategory').addEventListener('change', () => syncCustom('f-visa-subcategory'));
-
-  $('refresh-options').addEventListener('click', async () => {
-    const button = $('refresh-options');
-    button.disabled = true;
-    button.textContent = 'Reading BLS...';
-    const result = await window.bls.refreshOptions();
-    options = result.options;
-    fillForm(await window.bls.getConfig());
-    button.disabled = false;
-    button.textContent = 'Load lists from BLS';
-    toast(
-      result.ok
-        ? 'Visa lists updated from your BLS account.'
-        : result.reason || 'Could not read the BLS lists.',
-      7000,
-    );
+  // Settings wiring
+  $('settings-save').addEventListener('click', async () => {
+    setStatus('settings-status', 'Saving...');
+    const result = await window.nexa.saveConfig(readSettings());
+    if (!result.ok) return setStatus('settings-status', result.error || 'Could not save.', 'bad');
+    fillSettings(result.config);
+    setStatus('settings-status', 'Saved.', 'ok');
+    render(await window.nexa.getState());
   });
 
-  $('telegram-setup').addEventListener('click', async () => {
-    $('telegram-panel').classList.toggle('hidden');
-    if (!$('telegram-panel').classList.contains('hidden')) {
-      await refreshTelegramState();
-      $('telegram-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  $('settings-revert').addEventListener('click', async () => {
+    fillSettings(await window.nexa.getConfig());
+    setStatus('settings-status', 'Reverted.', 'ok');
+  });
+
+  $('add-folder').addEventListener('click', async () => {
+    const result = await window.nexa.pickFolder();
+    if (!result.ok) return;
+    config.files.allowedDirectories = [...new Set([...(config.files.allowedDirectories || []), result.path])];
+    renderFolders();
+    setStatus('settings-status', 'Folder added. Press Save settings to confirm.', 'ok');
+  });
+
+  $('llm-save').addEventListener('click', async () => {
+    setStatus('llm-status', 'Saving...');
+    const saved = await window.nexa.saveConfig({
+      llm: {
+        provider: $('f-llm-provider').value,
+        model: $('f-llm-model').value.trim() || 'claude-sonnet-5',
+        baseUrl: $('f-llm-baseurl').value.trim(),
+      },
+    });
+    if (!saved.ok) return setStatus('llm-status', saved.error || 'Could not save.', 'bad');
+
+    const key = $('f-llm-key').value.trim();
+    if (key) {
+      const result = await window.nexa.saveLlm({
+        provider: $('f-llm-provider').value,
+        apiKey: key,
+        baseUrl: $('f-llm-baseurl').value.trim(),
+      });
+      if (!result.ok) return setStatus('llm-status', result.error || 'Could not save the key.', 'bad');
+      $('f-llm-key').value = '';
     }
-  });
 
-  $('telegram-close').addEventListener('click', () => $('telegram-panel').classList.add('hidden'));
+    applySecrets(await window.nexa.getSecrets());
+    setStatus('llm-status', 'Provider saved.', 'ok');
+    render(await window.nexa.getState());
+  });
 
   $('telegram-save').addEventListener('click', async () => {
-    setTelegramStatus('Saving...');
-    const result = await window.bls.saveTelegram({
+    setStatus('telegram-status', 'Saving...');
+    const result = await window.nexa.saveTelegram({
       botToken: $('f-bot-token').value,
       chatId: $('f-chat-id').value,
     });
-    if (!result.ok) {
-      setTelegramStatus(result.error || 'Could not save.', 'bad');
-      return;
-    }
+    if (!result.ok) return setStatus('telegram-status', result.error || 'Could not save.', 'bad');
     $('f-bot-token').value = '';
-    await refreshTelegramState();
-    setTelegramStatus(
-      result.verified
-        ? `Saved and verified${result.botName ? ` as @${result.botName}` : ''}.`
-        : `Saved, but Telegram rejected it: ${result.error}`,
+    applySecrets(await window.nexa.getSecrets());
+    setStatus(
+      'telegram-status',
+      result.verified ? `Saved and verified${result.botName ? ` as @${result.botName}` : ''}.` : `Saved, but Telegram said: ${result.error}`,
       result.verified ? 'ok' : 'bad',
     );
-    render(await window.bls.getState());
+    render(await window.nexa.getState());
   });
 
   $('telegram-test').addEventListener('click', async () => {
-    setTelegramStatus('Sending...');
-    const outcome = await window.bls.testNotifications();
-    setTelegramStatus(
-      outcome.telegram.ok
-        ? 'Test message sent. Check your Telegram chat.'
-        : outcome.telegram.error || 'Telegram send failed.',
+    setStatus('telegram-status', 'Sending...');
+    const outcome = await window.nexa.testNotifications();
+    setStatus(
+      'telegram-status',
+      outcome.telegram.ok ? 'Test sent. Check Telegram.' : outcome.telegram.error || 'Send failed.',
       outcome.telegram.ok ? 'ok' : 'bad',
     );
   });
 
-  $('settings-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    setFormStatus('Saving…');
-    const result = await window.bls.saveConfig(readForm());
-    if (!result.ok) {
-      setFormStatus(result.error ? firstIssue(result.error) : 'Could not save.', 'bad');
-      return;
-    }
-    fillForm(result.config);
-    setFormStatus('Saved. Applied to the next check.', 'ok');
-    render(await window.bls.getState());
-  });
+  // Periodic refresh keeps relative times honest even when nothing is pushed.
+  setInterval(async () => render(await window.nexa.getState()), 15000);
+}
 
-  $('settings-revert').addEventListener('click', async () => {
-    fillForm(await window.bls.getConfig());
-    setFormStatus('Reverted to the saved values.', 'ok');
-  });
+function applySecrets(secrets) {
+  $('f-chat-id').value = secrets.telegram.chatId || '';
+  $('f-bot-token').placeholder = secrets.telegram.tokenPresent
+    ? 'Saved. Type a new token only to replace it.'
+    : '123456789:AAE...';
+  $('token-state').textContent = secrets.telegram.tokenPresent
+    ? `A token is stored in ${secrets.envPath}. It is never shown again.`
+    : `Will be written to ${secrets.envPath} with owner-only permissions.`;
 
-  $('btn-sign-in').addEventListener('click', async () => {
-    toast('Opening the BLS login page. Sign in there, not here.', 6000);
-    render(await window.bls.openLogin());
-  });
-
-  $('btn-toggle').addEventListener('click', async () => {
-    if (!latest) return;
-    if (latest.runState === 'RUNNING') render(await window.bls.pause());
-    else if (latest.manualActionRequired || latest.runState === 'PAUSED') render(await window.bls.resume());
-    else render(await window.bls.start());
-  });
-
-  $('btn-check-now').addEventListener('click', async () => {
-    $('btn-check-now').disabled = true;
-    const outcome = await window.bls.checkNow();
-    if (!outcome.accepted) toast(outcome.reason || 'Please wait before checking again.');
-    render(outcome.state);
-  });
-
-  const openBrowser = async () => render(await window.bls.openBrowser());
-  $('btn-open-browser').addEventListener('click', openBrowser);
-  $('alert-open-browser').addEventListener('click', openBrowser);
-
-  $('alert-resume').addEventListener('click', async () => render(await window.bls.resume()));
-
-  $('btn-screenshots').addEventListener('click', async () => {
-    const res = await window.bls.openScreenshotFolder();
-    if (!res.ok) toast(res.error || 'Could not open the screenshot folder.');
-  });
-
-  $('alert-view-screenshot').addEventListener('click', async () => {
-    if (!latest?.screenshotPath) return toast('No screenshot for this event.');
-    const res = await window.bls.openScreenshot(latest.screenshotPath);
-    if (!res.ok) toast(res.error || 'Could not open the screenshot.');
-  });
-
-  $('test-notifications').addEventListener('click', async () => {
-    toast('Sending test…', 2500);
-    const outcome = await window.bls.testNotifications();
-    toast(
-      `Test sent, telegram ${outcome.telegram.ok ? 'ok' : outcome.telegram.error || 'failed'}, desktop ${
-        outcome.desktop ? 'ok' : 'off'
-      }, sound ${outcome.sound ? 'ok' : 'off'}`,
-      7000,
-    );
-  });
-
-  setInterval(async () => render(await window.bls.getState()), 15000);
+  const present = secrets.anthropic.keyPresent || secrets.openai.keyPresent;
+  $('f-llm-key').placeholder = present ? 'Saved. Type a new key only to replace it.' : 'sk-ant-...';
+  $('llm-key-state').textContent = present
+    ? `A key is stored in ${secrets.envPath}. It is never shown again and never logged.`
+    : 'Written to your .env with owner-only permissions, and never logged.';
+  if (secrets.openai.baseUrl && !$('f-llm-baseurl').value) $('f-llm-baseurl').value = secrets.openai.baseUrl;
 }
 
 boot().catch((err) => {
-  document.body.innerHTML = `<pre style="padding:24px;color:#a4231f">Dashboard failed to start: ${
+  document.body.innerHTML = `<pre style="padding:24px;color:#b3261e;font:13px ui-monospace,monospace">Nexa dashboard failed to start: ${
     err && err.message ? err.message : String(err)
   }</pre>`;
 });

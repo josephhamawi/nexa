@@ -6,32 +6,33 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self';"
     />
-    <title>BLS Spain Appointment Monitor, Lagos</title>
+    <title>Nexa</title>
     <link rel="stylesheet" href="assets/fonts.css" />
     <link rel="stylesheet" href="assets/styles.css" />
   </head>
   <body>
-    <div class="paper">
-      <!-- ── Masthead ─────────────────────────────────────────────────── -->
-      <header class="masthead">
-        <div class="seal" aria-hidden="true">
-          <span class="seal-bar"></span><span class="seal-bar gold"></span><span class="seal-bar"></span>
+    <div class="shell">
+      <!-- Rail -->
+      <nav class="rail">
+        <div class="brand">
+          <span class="mark" aria-hidden="true"></span>
+          <span class="wordmark">Nexa</span>
         </div>
 
-        <div class="masthead-text">
-          <p class="eyebrow">Appointment availability monitor</p>
-          <h1>Spain <span class="thin">·</span> Lagos</h1>
-          <p class="subtitle">
-            BLS International, Nigeria <span class="dotsep"></span>
-            <em id="visa-type">-</em> <span class="dotsep"></span>
-            <span id="applicant-summary">-</span>
-          </p>
-        </div>
+        <ul class="nav" role="tablist">
+          <li><button class="nav-item active" data-view="overview" role="tab">Overview</button></li>
+          <li><button class="nav-item" data-view="tasks" role="tab">Tasks<span class="pill" id="pill-tasks">0</span></button></li>
+          <li><button class="nav-item" data-view="watchers" role="tab">Watchers<span class="pill" id="pill-watchers">0</span></button></li>
+          <li><button class="nav-item" data-view="approvals" role="tab">Approvals<span class="pill alert" id="pill-approvals">0</span></button></li>
+          <li><button class="nav-item" data-view="activity" role="tab">Activity</button></li>
+          <li><button class="nav-item" data-view="browser" role="tab">Browser</button></li>
+          <li><button class="nav-item" data-view="settings" role="tab">Settings</button></li>
+        </ul>
 
-        <div class="masthead-side">
+        <div class="rail-foot">
           <div class="theme-switch" role="group" aria-label="Colour theme">
             <button data-theme-choice="light" aria-label="Light theme" title="Light">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><g class="rays"><path d="M12 2.4v2.6M12 19v2.6M4.2 12H1.6M22.4 12h-2.6M6.1 6.1 4.3 4.3M19.7 19.7l-1.8-1.8M17.9 6.1l1.8-1.8M4.3 19.7l1.8-1.8"/></g></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><g><path d="M12 2.4v2.6M12 19v2.6M4.2 12H1.6M22.4 12h-2.6M6.1 6.1 4.3 4.3M19.7 19.7l-1.8-1.8M17.9 6.1l1.8-1.8M4.3 19.7l1.8-1.8"/></g></svg>
             </button>
             <button data-theme-choice="dark" aria-label="Dark theme" title="Dark">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.3 14.2A8.6 8.6 0 0 1 9.8 3.7a8.6 8.6 0 1 0 10.5 10.5Z"/></svg>
@@ -40,287 +41,280 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.8" y="4.3" width="18.4" height="12.4" rx="1.6"/><path d="M8.6 20.2h6.8"/></svg>
             </button>
           </div>
-          <p class="stamp" id="clock">-</p>
+          <p class="agent-state"><span id="agent-dot" class="dot"></span><span id="agent-state-label">starting</span></p>
         </div>
-      </header>
+      </nav>
 
-      <!-- ── Takeover banner: appointment found / manual action ───────── -->
-      <section id="alert-panel" class="alert hidden" aria-live="assertive">
-        <div class="alert-rule"></div>
-        <div class="alert-head">
-          <h2 id="alert-title">Appointment available</h2>
-          <span class="alert-badge" id="alert-badge">Monitoring stopped</span>
-        </div>
-
-        <dl class="alert-details">
-          <div><dt>Centre</dt><dd>Lagos, Nigeria</dd></div>
-          <div><dt>Visa</dt><dd id="alert-visa">-</dd></div>
-          <div><dt>Date</dt><dd id="alert-date" class="figure">-</dd></div>
-          <div><dt>Time</dt><dd id="alert-time" class="figure">-</dd></div>
-          <div><dt>Detected</dt><dd id="alert-detected" class="figure">-</dd></div>
-        </dl>
-
-        <p id="alert-more" class="alert-more hidden"></p>
-        <p class="alert-note" id="alert-note"></p>
-
-        <div class="actions">
-          <button id="alert-open-browser" class="btn btn-solid">Open browser</button>
-          <button id="alert-resume" class="btn hidden">Resume monitoring</button>
-          <button id="alert-view-screenshot" class="btn btn-quiet">View screenshot</button>
-        </div>
-      </section>
-
-      <!-- ── Status board ─────────────────────────────────────────────── -->
-      <section class="board">
-        <div class="board-status">
-          <p class="label">Status</p>
-          <p class="status-readout">
-            <span id="status-dot" class="dot idle" aria-hidden="true"></span>
-            <span id="status-label">Stopped</span>
-          </p>
-          <p id="availability-message" class="availability">No appointment currently detected</p>
-          <p id="backoff-note" class="footnote"></p>
-        </div>
-
-        <div class="board-timing">
-          <div class="timing-row">
-            <p class="label">Last check</p>
-            <p id="last-check" class="figure lg">-</p>
-            <p id="last-check-date" class="footnote">-</p>
+      <!-- Main -->
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <h1 id="view-title">Overview</h1>
+            <p class="tagline" id="view-subtitle">Your AI operations agent</p>
           </div>
-          <div class="timing-row">
-            <p class="label">Next check</p>
-            <p id="next-check" class="figure lg">-</p>
-            <p id="next-check-in" class="footnote">-</p>
+          <div class="topbar-meta">
+            <span class="meta" id="llm-badge">model: checking</span>
+            <span class="meta" id="telegram-badge">telegram: checking</span>
+            <span class="meta mono" id="clock">--:--:--</span>
           </div>
-          <div class="timing-row">
-            <p class="label">Interval</p>
-            <p id="interval" class="figure lg">-</p>
-            <p class="footnote">randomised</p>
-          </div>
-        </div>
-      </section>
+        </header>
 
-      <!-- ── Controls ─────────────────────────────────────────────────── -->
-      <section class="controls">
-        <button id="btn-check-now" class="btn btn-solid">Check now</button>
-        <button id="btn-toggle" class="btn">Start</button>
-        <button id="btn-sign-in" class="btn">Sign in to BLS</button>
-        <button id="btn-open-browser" class="btn btn-quiet">Open browser</button>
-        <button id="btn-screenshots" class="btn btn-quiet">Screenshots</button>
-        <span id="toast" class="toast" role="status"></span>
-      </section>
-
-      <!-- ── Ledger ───────────────────────────────────────────────────── -->
-      <div class="ledger">
-        <section class="card">
-          <h3>Register</h3>
-          <ul class="rows">
-            <li><span>Checks today</span><strong id="stat-checks" class="figure">0</strong></li>
-            <li><span>Appointments detected</span><strong id="stat-found" class="figure">0</strong></li>
-            <li><span>Errors today</span><strong id="stat-errors" class="figure">0</strong></li>
-          </ul>
+        <!-- Command bar -->
+        <section class="command">
+          <label class="sr-only" for="command-input">Tell Nexa what needs to get done</label>
+          <input
+            id="command-input"
+            type="text"
+            autocomplete="off"
+            placeholder="Tell Nexa what needs to get done..."
+          />
+          <button id="command-send" class="btn btn-solid">Run</button>
         </section>
+        <p id="command-reply" class="command-reply"></p>
 
-        <section class="card">
-          <h3>Session</h3>
-          <ul class="rows">
-            <li><span>BLS account</span><strong id="session-status" class="tag neutral">Unknown</strong></li>
-            <li><span>Chromium</span><strong id="browser-status" class="tag neutral">Closed</strong></li>
-          </ul>
-          <p class="note">
-            Press <em>Sign in to BLS</em> and complete the login and verification in the browser
-            yourself. The session persists between restarts, and monitoring resumes on its own once
-            you are through. While you are working in the browser, scheduled checks wait rather than
-            navigating the page away from you. Your password is never typed, stored or read by this
-            application.
-          </p>
-        </section>
-
-        <section class="card">
-          <h3>Notifications</h3>
-          <ul class="rows">
-            <li><span>Telegram</span><strong id="ch-telegram" class="tag neutral">-</strong></li>
-            <li><span>Desktop</span><strong id="ch-desktop" class="tag neutral">-</strong></li>
-            <li><span>Sound</span><strong id="ch-sound" class="tag neutral">-</strong></li>
-          </ul>
-          <div class="card-actions">
-            <button id="test-notifications" class="btn btn-quiet btn-sm">Send test</button>
-            <button id="telegram-setup" class="btn btn-quiet btn-sm">Set up Telegram</button>
+        <!-- Overview -->
+        <section class="view active" data-view="overview">
+          <div class="stat-row">
+            <div class="stat"><span>Active tasks</span><strong id="stat-active" class="figure">0</strong></div>
+            <div class="stat"><span>Watchers</span><strong id="stat-watchers" class="figure">0</strong></div>
+            <div class="stat"><span>Waiting on you</span><strong id="stat-waiting" class="figure">0</strong></div>
+            <div class="stat"><span>Done today</span><strong id="stat-done" class="figure">0</strong></div>
+            <div class="stat"><span>Failed today</span><strong id="stat-failed" class="figure">0</strong></div>
           </div>
-        </section>
 
-        <section class="card">
-          <h3>Window watched</h3>
-          <ul class="rows">
-            <li><span>Date from</span><strong id="pref-date-from" class="figure">any</strong></li>
-            <li><span>Date to</span><strong id="pref-date-to" class="figure">any</strong></li>
-            <li><span>Time from</span><strong id="pref-time-from" class="figure">any</strong></li>
-            <li><span>Time to</span><strong id="pref-time-to" class="figure">any</strong></li>
-          </ul>
-          <p class="note">Set these in <em>Application details</em> below.</p>
-        </section>
-      </div>
+          <div class="split">
+            <section class="panel">
+              <h2>Running now</h2>
+              <div id="overview-tasks" class="list"></div>
+              <p id="overview-tasks-empty" class="empty">
+                Nothing running. Try <em>research the latest AI agent frameworks</em> or
+                <em>watch example.com and tell me when it changes</em>.
+              </p>
+            </section>
 
-      <!-- ── Application details (editable) ───────────────────────────── -->
-      <section class="card settings">
-        <div class="settings-head">
-          <h3>Application details</h3>
-          <div class="settings-aside">
-            <p class="note settings-hint">
-              What the monitor selects on the BLS form, and which slots count as a match.
-            </p>
-            <button type="button" id="refresh-options" class="btn btn-quiet btn-sm">
-              Load lists from BLS
-            </button>
+            <section class="panel">
+              <h2>Latest activity</h2>
+              <ol id="overview-activity" class="timeline"></ol>
+              <p id="overview-activity-empty" class="empty">Nexa has not done anything yet.</p>
+            </section>
           </div>
-        </div>
-        <p id="options-source" class="note options-source">
-          Choices below are the published BLS categories. Sign in, then press
-          <em>Load lists from BLS</em> to replace them with exactly what your account is offered.
-        </p>
 
-        <!-- novalidate: the Zod schema in the main process is the single source of
-             truth, so its message is what you see instead of a silent browser block. -->
-        <form id="settings-form" class="form-grid" autocomplete="off" novalidate>
-          <label class="field">
-            <span>Visa type</span>
-            <select id="f-visa-type" name="visaType"></select>
-            <input id="f-visa-type-custom" class="custom-input hidden" type="text"
-                   placeholder="Type it exactly as BLS words it" />
-            <small id="f-visa-type-hint">Pick Custom if BLS words it differently.</small>
-          </label>
-
-          <label class="field">
-            <span>Category</span>
-            <select id="f-visa-subcategory" name="visaSubCategory"></select>
-            <input id="f-visa-subcategory-custom" class="custom-input hidden" type="text"
-                   placeholder="Type it exactly as BLS words it" />
-            <small>The form's second dropdown. Choose None if it only asks once.</small>
-          </label>
-
-          <label class="field">
-            <span>Appointment for</span>
-            <select id="f-applicant-type" name="applicantType">
-              <option value="Individual">Individual</option>
-              <option value="Family">Family</option>
-              <option value="Group">Group</option>
-            </select>
-            <small>Family and Group are scheduled separately by BLS.</small>
-          </label>
-
-          <label class="field">
-            <span>Applicants</span>
-            <input id="f-member-count" name="memberCount" type="number" min="1" max="20" step="1" />
-            <small>Number of members on the booking.</small>
-          </label>
-
-          <label class="field">
-            <span>Date from</span>
-            <input id="f-date-from" name="preferredDateFrom" type="date" />
-            <small>Blank = any date.</small>
-          </label>
-
-          <label class="field">
-            <span>Date to</span>
-            <input id="f-date-to" name="preferredDateTo" type="date" />
-            <small>Blank = any date.</small>
-          </label>
-
-          <label class="field">
-            <span>Time from</span>
-            <input id="f-time-from" name="preferredTimeFrom" type="time" />
-            <small>Blank = any time.</small>
-          </label>
-
-          <label class="field">
-            <span>Time to</span>
-            <input id="f-time-to" name="preferredTimeTo" type="time" />
-            <small>Blank = any time.</small>
-          </label>
-
-          <label class="field">
-            <span>Interval min</span>
-            <input id="f-interval-min" name="intervalMinSeconds" type="number" min="180" max="7200" step="30" />
-            <small>Seconds. 180 is the floor.</small>
-          </label>
-
-          <label class="field">
-            <span>Interval max</span>
-            <input id="f-interval-max" name="intervalMaxSeconds" type="number" min="180" max="7200" step="30" />
-            <small>Each wait is drawn at random from this range.</small>
-          </label>
-
-          <fieldset class="field field-wide">
-            <span>Notifications</span>
-            <div class="checks">
-              <label><input id="f-telegram" type="checkbox" /> Telegram</label>
-              <label><input id="f-desktop" type="checkbox" /> Desktop</label>
-              <label><input id="f-sound" type="checkbox" /> Sound</label>
+          <section class="panel">
+            <h2>Suggestions</h2>
+            <div class="chips">
+              <button class="chip" data-suggest="Research the latest AI agent frameworks and send me a summary">Research a topic</button>
+              <button class="chip" data-suggest="Find 5 remote AI engineering jobs that match my profile">Find jobs</button>
+              <button class="chip" data-suggest="Watch https://news.ycombinator.com and tell me when it changes">Create a watcher</button>
+              <button class="chip" data-suggest="Every morning at 8am send me a brief of important AI news">Daily brief</button>
             </div>
-            <small>Alerts fire on availability, CAPTCHA, login and errors needing you.</small>
-          </fieldset>
+          </section>
+        </section>
 
-          <div class="form-actions">
-            <button type="submit" class="btn btn-solid btn-sm">Save details</button>
-            <button type="button" id="settings-revert" class="btn btn-quiet btn-sm">Revert</button>
-            <span id="settings-status" class="form-status" role="status"></span>
-          </div>
-        </form>
-      </section>
+        <!-- Tasks -->
+        <section class="view" data-view="tasks">
+          <section class="panel">
+            <h2>Active</h2>
+            <div id="tasks-active" class="list"></div>
+            <p id="tasks-active-empty" class="empty">No active tasks.</p>
+          </section>
+          <section class="panel">
+            <h2>History</h2>
+            <div id="tasks-history" class="list"></div>
+            <p id="tasks-history-empty" class="empty">Nothing finished yet.</p>
+          </section>
+        </section>
 
-      <!-- Telegram setup -->
-      <section id="telegram-panel" class="card telegram-panel hidden">
-        <h3>Telegram setup</h3>
-        <ol class="steps">
-          <li>Open Telegram and message <strong>@BotFather</strong>. Send <code>/newbot</code>,
-            choose a name, and copy the token it gives you.</li>
-          <li>Message <strong>@userinfobot</strong>. It replies with your numeric chat ID.</li>
-          <li>Send your own new bot any message once, so it is allowed to write to you.</li>
-          <li>Paste both below and save.</li>
-        </ol>
+        <!-- Watchers -->
+        <section class="view" data-view="watchers">
+          <section class="panel">
+            <h2>Watchers</h2>
+            <div id="watchers-list" class="list"></div>
+            <p id="watchers-empty" class="empty">
+              No watchers. Ask for one: <em>watch example.com/pricing and tell me when the price changes</em>.
+            </p>
+          </section>
+        </section>
 
-        <div class="form-grid">
-          <label class="field field-wide">
-            <span>Bot token</span>
-            <input id="f-bot-token" type="password" autocomplete="off" spellcheck="false"
-                   placeholder="123456789:AAE..." />
-            <small id="token-state">Stored in your .env file, never shown again and never logged.</small>
-          </label>
+        <!-- Approvals -->
+        <section class="view" data-view="approvals">
+          <section class="panel">
+            <h2>Waiting for you</h2>
+            <div id="approvals-list" class="list"></div>
+            <p id="approvals-empty" class="empty">Nothing is waiting on you.</p>
+          </section>
+        </section>
 
-          <label class="field">
-            <span>Chat ID</span>
-            <input id="f-chat-id" type="text" autocomplete="off" inputmode="numeric"
-                   placeholder="987654321" />
-            <small>Numbers only. Group chats start with a minus sign.</small>
-          </label>
+        <!-- Activity -->
+        <section class="view" data-view="activity">
+          <section class="panel">
+            <h2>Agent activity</h2>
+            <ol id="activity-list" class="timeline full"></ol>
+          </section>
+        </section>
 
-          <div class="form-actions">
-            <button type="button" id="telegram-save" class="btn btn-solid btn-sm">Save and verify</button>
-            <button type="button" id="telegram-test" class="btn btn-quiet btn-sm">Send test message</button>
-            <button type="button" id="telegram-close" class="btn btn-quiet btn-sm">Close</button>
-            <span id="telegram-status" class="form-status" role="status"></span>
-          </div>
-        </div>
+        <!-- Browser -->
+        <section class="view" data-view="browser">
+          <section class="panel">
+            <h2>Browser profiles</h2>
+            <div id="browser-list" class="list"></div>
+            <p class="note">
+              Each profile is a separate persistent browser session with its own cookies. Nexa waits
+              rather than navigating a page while you are using it, and never tries to defeat a
+              CAPTCHA: it stops and asks you to take over.
+            </p>
+          </section>
+        </section>
 
-        <p class="note">
-          These are credentials for a bot you own, which is why the application can hold them.
-          Your BLS password is different and is never entered here.
-        </p>
-      </section>
+        <!-- Settings -->
+        <section class="view" data-view="settings">
+          <section class="panel">
+            <h2>AI provider</h2>
+            <form id="llm-form" class="form-grid" autocomplete="off" novalidate>
+              <label class="field">
+                <span>Provider</span>
+                <select id="f-llm-provider">
+                  <option value="anthropic">Anthropic</option>
+                  <option value="openai-compatible">OpenAI-compatible</option>
+                  <option value="none">None (rules only)</option>
+                </select>
+                <small>Without a provider Nexa still runs, planning with rules.</small>
+              </label>
+              <label class="field">
+                <span>Model</span>
+                <input id="f-llm-model" type="text" placeholder="claude-sonnet-5" />
+                <small>Any model name the provider accepts.</small>
+              </label>
+              <label class="field">
+                <span>API key</span>
+                <input id="f-llm-key" type="password" placeholder="Stored in .env, never shown again" />
+                <small id="llm-key-state">Written to your .env with owner-only permissions.</small>
+              </label>
+              <label class="field">
+                <span>Base URL</span>
+                <input id="f-llm-baseurl" type="text" placeholder="https://api.openai.com/v1" />
+                <small>OpenAI-compatible servers only (Ollama, vLLM, LM Studio).</small>
+              </label>
+              <div class="form-actions">
+                <button type="button" id="llm-save" class="btn btn-solid btn-sm">Save provider</button>
+                <span id="llm-status" class="form-status"></span>
+              </div>
+            </form>
+          </section>
 
-      <!-- ── Event log ────────────────────────────────────────────────── -->
-      <section class="card log">
-        <h3>Event log</h3>
-        <ol id="event-log" class="event-log"></ol>
-        <p id="log-empty" class="note">Nothing yet. Press <em>Start</em> to begin watching.</p>
-      </section>
+          <section class="panel">
+            <h2>Telegram</h2>
+            <ol class="steps">
+              <li>Message <strong>@BotFather</strong>, send <code>/newbot</code>, copy the token.</li>
+              <li>Message <strong>@userinfobot</strong> for your numeric chat ID.</li>
+              <li>Send your own bot a message once so it may write to you.</li>
+            </ol>
+            <div class="form-grid">
+              <label class="field">
+                <span>Bot token</span>
+                <input id="f-bot-token" type="password" autocomplete="off" placeholder="123456789:AAE..." />
+                <small id="token-state">Stored in .env, never shown again and never logged.</small>
+              </label>
+              <label class="field">
+                <span>Chat ID</span>
+                <input id="f-chat-id" type="text" autocomplete="off" inputmode="numeric" placeholder="987654321" />
+                <small>Numbers only. Only this chat may command Nexa.</small>
+              </label>
+              <div class="form-actions">
+                <button type="button" id="telegram-save" class="btn btn-solid btn-sm">Save and verify</button>
+                <button type="button" id="telegram-test" class="btn btn-quiet btn-sm">Send test</button>
+                <span id="telegram-status" class="form-status"></span>
+              </div>
+            </div>
+          </section>
 
-      <footer class="colophon">
-        <span class="rule"></span>
-        Availability monitor only. It never solves CAPTCHAs, never enters credentials, never pays,
-        and never completes a booking. You do that yourself, in the browser.
-      </footer>
+          <section class="panel">
+            <h2>Your profile</h2>
+            <p class="note">Used when a task is about your career, learning or interests.</p>
+            <div class="form-grid">
+              <label class="field field-wide">
+                <span>Professional summary</span>
+                <input id="f-summary" type="text" placeholder="AI engineer building agentic systems" />
+              </label>
+              <label class="field">
+                <span>Skills</span>
+                <input id="f-skills" type="text" placeholder="comma separated" />
+              </label>
+              <label class="field">
+                <span>Technologies</span>
+                <input id="f-technologies" type="text" placeholder="comma separated" />
+              </label>
+              <label class="field">
+                <span>Preferred roles</span>
+                <input id="f-roles" type="text" placeholder="comma separated" />
+              </label>
+              <label class="field">
+                <span>Excluded roles</span>
+                <input id="f-excluded" type="text" placeholder="comma separated" />
+              </label>
+              <label class="field">
+                <span>Remote preference</span>
+                <select id="f-remote">
+                  <option value="remote">Remote</option>
+                  <option value="hybrid">Hybrid</option>
+                  <option value="onsite">Onsite</option>
+                  <option value="any">Any</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Minimum salary</span>
+                <input id="f-salary" type="number" min="0" step="1000" placeholder="80000" />
+              </label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Agent behaviour</h2>
+            <div class="form-grid">
+              <label class="field">
+                <span>Min watcher interval (s)</span>
+                <input id="f-watch-interval" type="number" min="60" max="86400" step="60" />
+                <small>Politeness floor for every watcher.</small>
+              </label>
+              <label class="field">
+                <span>Step retries</span>
+                <input id="f-retries" type="number" min="0" max="5" />
+                <small>Attempts before a task is parked as failed.</small>
+              </label>
+              <fieldset class="field field-wide">
+                <span>Safety</span>
+                <div class="checks">
+                  <label><input id="f-approval" type="checkbox" /> Ask before anything that changes something</label>
+                  <label><input id="f-demo" type="checkbox" /> Demo mode (simulate, contact nothing)</label>
+                </div>
+              </fieldset>
+              <fieldset class="field field-wide">
+                <span>Notifications</span>
+                <div class="checks">
+                  <label><input id="f-telegram-on" type="checkbox" /> Telegram</label>
+                  <label><input id="f-desktop-on" type="checkbox" /> Desktop</label>
+                  <label><input id="f-sound-on" type="checkbox" /> Sound</label>
+                </div>
+              </fieldset>
+              <fieldset class="field field-wide">
+                <span>Folders Nexa may read</span>
+                <div id="folder-list" class="folder-list"></div>
+                <button type="button" id="add-folder" class="btn btn-quiet btn-sm">Add folder</button>
+                <small>Nexa refuses to read anything outside this list.</small>
+              </fieldset>
+              <div class="form-actions">
+                <button type="button" id="settings-save" class="btn btn-solid btn-sm">Save settings</button>
+                <button type="button" id="settings-revert" class="btn btn-quiet btn-sm">Revert</button>
+                <span id="settings-status" class="form-status"></span>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <footer class="colophon">
+          Nexa runs locally. It never solves CAPTCHAs, never enters your credentials, and asks before
+          anything consequential. When a site needs a human, it stops and hands you the browser.
+        </footer>
+      </main>
     </div>
 
     <script src="assets/renderer.js"></script>

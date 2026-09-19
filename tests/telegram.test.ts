@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TelegramNotifier } from '../src/notifications/TelegramNotifier';
 import { NotificationManager } from '../src/notifications/NotificationManager';
-import { buildResult } from '../src/availability/AvailabilityResult';
-import { AvailabilityStatus } from '../src/availability/AvailabilityState';
 
 const originalFetch = globalThis.fetch;
 
@@ -11,49 +9,70 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function stubFetch(ok: boolean, body: unknown = { ok: true }): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn(async () => ({
-    ok,
-    status: ok ? 200 : 401,
-    json: async () => body,
-    text: async () => JSON.stringify(body),
+function stubTelegram(ok: boolean, result: unknown = { message_id: 1 }) {
+  const mock = vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ ok, result, description: ok ? undefined : 'Unauthorized for bot 123456789:TEST-TOKEN-FOR-UNIT-TESTS-ONLY-XXXXXX' }),
+    text: async () => '',
   }));
-  globalThis.fetch = fetchMock as unknown as typeof fetch;
-  return fetchMock;
+  globalThis.fetch = mock as unknown as typeof fetch;
+  return mock;
 }
 
-describe('TelegramNotifier', () => {
-  it('posts the message to sendMessage with the configured chat id', async () => {
-    const fetchMock = stubFetch(true);
-    const notifier = new TelegramNotifier(true);
-
-    const result = await notifier.send('hello');
+describe('sending', () => {
+  it('posts to the configured chat', async () => {
+    const mock = stubTelegram(true);
+    const result = await new TelegramNotifier(true).send('hello');
     expect(result.ok).toBe(true);
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = mock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/sendMessage');
-    const payload = JSON.parse(String(init.body));
-    expect(payload.text).toBe('hello');
-    expect(payload.chat_id).toBe(process.env.TELEGRAM_CHAT_ID);
+    const body = JSON.parse(String(init.body));
+    expect(body.text).toBe('hello');
+    expect(body.chat_id).toBe(process.env.TELEGRAM_CHAT_ID);
   });
 
-  it('skips cleanly when disabled in config', async () => {
-    const fetchMock = stubFetch(true);
+  it('sends to a specific chat when asked', async () => {
+    const mock = stubTelegram(true);
+    await new TelegramNotifier(true).send('hi', { chatId: '999' });
+    const [, init] = mock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).chat_id).toBe('999');
+  });
+
+  it('attaches inline buttons for approvals', async () => {
+    const mock = stubTelegram(true);
+    await new TelegramNotifier(true).send('approve?', {
+      buttons: [[{ text: 'Approve', data: 'approve:abc' }, { text: 'Reject', data: 'reject:abc' }]],
+    });
+    const [, init] = mock.mock.calls[0] as [string, RequestInit];
+    const keyboard = JSON.parse(String(init.body)).reply_markup.inline_keyboard;
+    expect(keyboard[0][0]).toEqual({ text: 'Approve', callback_data: 'approve:abc' });
+  });
+
+  it('truncates past Telegram\'s 4096 character limit', async () => {
+    const mock = stubTelegram(true);
+    await new TelegramNotifier(true).send('x'.repeat(9000));
+    const [, init] = mock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).text.length).toBe(4096);
+  });
+
+  it('skips cleanly when disabled', async () => {
+    const mock = stubTelegram(true);
     const result = await new TelegramNotifier(false).send('hello');
-    expect(result.ok).toBe(false);
     expect(result.skipped).toBe(true);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mock).not.toHaveBeenCalled();
   });
 
-  it('reports API failures without leaking the token', async () => {
-    stubFetch(false, { description: 'Unauthorized for bot 123456789:TEST-TOKEN-FOR-UNIT-TESTS-ONLY-XXXXXX' });
+  it('never leaks the token in an error', async () => {
+    stubTelegram(false);
     const result = await new TelegramNotifier(true).send('hello');
     expect(result.ok).toBe(false);
     expect(result.error).not.toContain('TEST-TOKEN-FOR-UNIT-TESTS');
     expect(result.error).toContain('[redacted-token]');
   });
 
-  it('surfaces network errors instead of throwing', async () => {
+  it('survives a network failure', async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error('getaddrinfo ENOTFOUND api.telegram.org');
     }) as unknown as typeof fetch;
@@ -63,59 +82,57 @@ describe('TelegramNotifier', () => {
   });
 });
 
-describe('NotificationManager', () => {
-  it('formats the appointment alert with Lagos identity, date and time', async () => {
-    const fetchMock = stubFetch(true);
-    const manager = new NotificationManager({ telegram: true, desktop: false, sound: false });
-
-    const result = buildResult({
-      visaType: 'Tourist',
-      status: AvailabilityStatus.AVAILABLE,
-      message: 'slots',
-      appointments: [
-        { date: '2026-10-14', time: '09:30' },
-        { date: '2026-10-15', time: '10:00' },
-      ],
-      checkedAt: new Date('2026-09-18T10:42:18Z'),
-    });
-
-    await manager.appointmentFound(result);
-
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const text = JSON.parse(String(init.body)).text as string;
-    expect(text).toContain('BLS SPAIN APPOINTMENT AVAILABLE');
-    expect(text).toContain('Lagos, Nigeria');
-    expect(text).toContain('Tourist');
-    expect(text).toContain('14 October 2026');
-    expect(text).toContain('09:30');
-    expect(text).toContain('Complete the booking manually');
-    expect(text).toContain('+1 more slot');
+describe('receiving', () => {
+  it('parses a normal message', async () => {
+    stubTelegram(true, [
+      { update_id: 7, message: { text: 'find me jobs', chat: { id: 42424242 }, from: { username: 'rami' }, message_id: 3 } },
+    ]);
+    const updates = await new TelegramNotifier(true).getUpdates(0);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({ updateId: 7, chatId: '42424242', text: 'find me jobs', isCallback: false });
   });
 
-  it('formats the login alert', async () => {
-    const fetchMock = stubFetch(true);
-    const manager = new NotificationManager({ telegram: true, desktop: false, sound: false });
-
-    await manager.manualActionRequired(
-      buildResult({
-        visaType: 'Tourist',
-        status: AvailabilityStatus.LOGIN_REQUIRED,
-        message: 'BLS Spain Lagos requires login.',
-      }),
-    );
-
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const text = JSON.parse(String(init.body)).text as string;
-    expect(text).toContain('requires login');
-    expect(text).toContain('Monitoring is paused');
+  it('parses a button press as a callback', async () => {
+    stubTelegram(true, [
+      {
+        update_id: 9,
+        callback_query: { id: 'cb1', data: 'approve:task-1', from: { username: 'rami' }, message: { chat: { id: 42424242 } } },
+      },
+    ]);
+    const updates = await new TelegramNotifier(true).getUpdates(0);
+    expect(updates[0]).toMatchObject({ isCallback: true, text: 'approve:task-1', callbackId: 'cb1' });
   });
 
-  it('reports channel status', () => {
-    const manager = new NotificationManager({ telegram: false, desktop: true, sound: false });
-    expect(manager.status()).toEqual({
-      telegram: 'disabled',
-      desktop: 'enabled',
-      sound: 'disabled',
-    });
+  it('drops updates with no usable content', async () => {
+    stubTelegram(true, [{ update_id: 11, message: { chat: { id: 42424242 } } }]);
+    expect(await new TelegramNotifier(true).getUpdates(0)).toHaveLength(0);
+  });
+});
+
+describe('notification manager', () => {
+  it('offers approve and reject buttons with the task id', async () => {
+    const mock = stubTelegram(true);
+    const manager = new NotificationManager({ telegram: true, desktop: false, sound: false, dailyBriefAt: '' });
+    await manager.approvalNeeded({ taskName: 'Submit form', reason: 'It posts data', taskId: 'abc-123' });
+
+    const [, init] = mock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body.text).toContain('Approval needed');
+    expect(body.reply_markup.inline_keyboard[0][0].callback_data).toBe('approve:abc-123');
+  });
+
+  it('offers open, resume and cancel when a human is needed', async () => {
+    const mock = stubTelegram(true);
+    const manager = new NotificationManager({ telegram: true, desktop: false, sound: false, dailyBriefAt: '' });
+    await manager.humanNeeded({ taskName: 'Browse', reason: 'CAPTCHA appeared', taskId: 'xyz' });
+
+    const [, init] = mock.mock.calls[0] as [string, RequestInit];
+    const keyboard = JSON.parse(String(init.body)).reply_markup.inline_keyboard.flat();
+    expect(keyboard.map((b: { callback_data: string }) => b.callback_data)).toEqual(['open:xyz', 'resume:xyz', 'cancel:xyz']);
+  });
+
+  it('reports channel status honestly', () => {
+    const manager = new NotificationManager({ telegram: false, desktop: true, sound: false, dailyBriefAt: '' });
+    expect(manager.status()).toEqual({ telegram: 'disabled', desktop: 'enabled', sound: 'disabled' });
   });
 });

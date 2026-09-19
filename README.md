@@ -1,551 +1,270 @@
-# BLS Spain Appointment Monitor (Lagos, Nigeria)
+# Nexa
 
-🇪🇸 Spain · 📍 Lagos, Nigeria
+**Your AI operations agent.** Tell Nexa what you need, and it researches, monitors
+websites, runs browser workflows, manages recurring tasks, analyses what it finds,
+and reports back through the desktop app and Telegram.
 
-An availability monitor for Spanish visa appointments at the **BLS International
-Lagos centre**. It watches the official portal, tells you the moment a suitable
-slot appears, and then gets out of the way so you can book it yourself.
+Nexa is not a chat window. It plans, acts, verifies and reports.
+
+```
+You:   Find 5 remote AI engineering jobs that match my profile.
+Nexa:  Task created: remote AI engineering jobs
+       Plan (AI-planned):
+       1. Search for roles matching your profile
+       2. Rank them against your skills and salary floor
+       3. Send the shortlist
+       I will report back when it is done.
+```
 
 ---
 
 ## What it does
 
-- Opens the official BLS Spain Nigeria portal in a real Chromium window using a
-  **persistent profile**, so you log in once and stay logged in.
-- Polls the appointment page on a **randomised 3-6 minute interval** with error
-  backoff.
-- Detects available slots, normalises them to `YYYY-MM-DD` / `HH:mm`, and filters
-  them against your preferred date and time windows.
-- Alerts you via **Telegram, a desktop notification and a sound**, stops
-  monitoring, captures a screenshot and leaves the browser open on the page.
-- Detects CAPTCHA / human verification, login walls and session expiry, pauses,
-  and hands you the browser. It then notices when you are finished and **resumes
-  by itself**, without you pressing anything.
-- Everything you would otherwise edit in `config.json` (visa type and category,
-  Individual / Family / Group, number of applicants, date and time windows,
-  polling interval, notification channels) is editable in the dashboard.
+- **Understands a request** in plain language, from the desktop app or Telegram.
+- **Plans** it into concrete steps with a named tool for each one.
+- **Acts**: searches the web, reads pages, drives a real browser, reads approved folders.
+- **Watches** pages and searches on a schedule, reporting only meaningful change.
+- **Asks** before anything consequential, and stops for a human when a site does.
+- **Reports** with evidence: URLs, timestamps, screenshots, extracted data.
+- **Survives restarts**: tasks, schedules and watchers are on disk, not in memory.
 
-## What it deliberately does NOT do
+### What it will not do
 
-This is a monitor, not a bot. It will never:
+- Solve or bypass CAPTCHAs, Cloudflare challenges or any other human check.
+- Enter your passwords. When a site needs a login, it hands you the browser.
+- Read outside the folders you have explicitly allowed.
+- Claim something was done when it was not.
 
-- solve, submit, read or interact with a CAPTCHA or any human-verification
-  challenge;
-- bypass Cloudflare, anti-bot systems, rate limits or fingerprinting (it runs
-  stock Playwright Chromium with no stealth plugin and no fingerprint patching);
-- type, store or transmit your BLS password;
-- handle OTP / MFA codes;
-- make a payment;
-- click a final booking confirmation.
-
-When any of those steps appears, monitoring **stops** and hands you the browser.
-The code enforces this: `FORBIDDEN_ACTION_PATTERNS` in `src/bls/BlsSelectors.ts`
-lists the controls the adapter refuses to click, and there is no code path that
-submits a booking.
-
-### One rule above all others
-
-**A technical failure is never reported as "no appointments available."**
-
-`NOT_AVAILABLE` is produced only when the page explicitly says there is nothing
-to book (see `NO_APPOINTMENT_PATTERNS`). A page that failed to load, changed
-shape, bounced to login or showed a CAPTCHA produces its own status
-(`SITE_UNAVAILABLE`, `ERROR`, `LOGIN_REQUIRED`, `CAPTCHA_REQUIRED`), so you never
-mistake a broken scraper for a fully booked centre.
+When a page needs a person, the task moves to `WAITING_FOR_HUMAN`, Nexa screenshots
+the state, messages you, and waits. You finish the step, press **Resume**, and it
+carries on from where it stopped.
 
 ---
 
 ## Architecture
 
 ```
-src/
-  main/            Electron shell (main process, IPC, preload)
-  ui/              Dashboard (plain HTML/CSS/JS, context-isolated)
-  browser/         Persistent Chromium profile + session bookkeeping
-  bls/             Everything BLS-specific
-     BlsSelectors.ts          all selectors, URLs and text patterns
-     BlsPageDetector.ts       login / CAPTCHA / site-error detection
-     BlsAvailabilityParser.ts turns a page into AVAILABLE / NOT_AVAILABLE / failure
-     BlsSpainAdapter.ts       drives the portal
-     errors.ts                WebsiteStructureChangedError et al.
-  monitoring/      MonitorManager, MonitorWorker, Scheduler, MonitorState
-  availability/    AvailabilityResult + status vocabulary and filtering
-  notifications/   Telegram, desktop, sound
-  storage/         State file + JSONL event log
-  config/          Zod schema and loader
-  logging/         Pino logger with credential redaction
-  utils/           time, retry, randomDelay, screenshots
-  cli/             login, monitor, check, diagnostics, test:telegram
-
-data/
-  sessions/bls-spain-lagos/   persistent Chromium profile (gitignored)
-  screenshots/bls-spain-lagos/
-  logs/
-  state/
+            You  (desktop UI / Telegram)
+             |
+        NexaAgent            orchestration, one entry point for every request
+             |
+          Planner            language -> plan (LLM, with a rule-based fallback)
+             |
+   TaskEngine   WatcherEngine   state machines, retries, scheduling, recovery
+             |
+        ToolRegistry         permission-checked capabilities
+             |
+  web_research  browser  watcher  analyze  files  notify
+             |
+      Evidence + Results -> desktop + Telegram
 ```
 
-Key design points:
+```
+src/
+  agent/        NexaAgent (orchestrator), Planner, ActivityLog
+  tasks/        Task model + state machine, TaskEngine
+  watchers/     Watcher model + change detection, WatcherEngine
+  tools/        Tool interface, registry, and the six built-in tools
+  llm/          Provider interface, Anthropic, OpenAI-compatible, null
+  browser/      BrowserManager (profiles, locking), ChallengeDetector
+  telegram/     TelegramBot: long polling, commands, inline buttons
+  notifications/ Telegram, desktop, sound
+  evidence/     Screenshots and captured payloads
+  storage/      Durable JSON stores
+  config/       Zod schema, config and secret handling
+  main/         Electron main process, IPC, preload
+  ui/           Dashboard (plain HTML/CSS/JS, context-isolated)
+  cli/          agent, doctor, test:telegram
+```
 
-- **One browser, one adapter, one scheduler, one worker.** `MonitorWorker` holds
-  an in-flight guard, so a scheduled poll arriving during a manual check is
-  skipped rather than queued. Parallel loops are impossible by construction.
-- **Detection runs on snapshots, not on live pages.** `PageSnapshot` is a plain
-  serialisable object, which is why the same detection logic runs unchanged in
-  unit tests against HTML fixtures.
-- **Selectors live in exactly one file** with ordered fallbacks; when every
-  strategy misses, the adapter raises `WebsiteStructureChangedError`.
+Design decisions worth knowing:
+
+- **The task state machine is real.** Every transition is declared and checked;
+  an illegal one throws rather than corrupting state. Crash recovery is an
+  explicit `RUNNING -> QUEUED` edge, not a silent reset.
+- **Permissions are per task.** A tool declares what it needs (`RESEARCH`,
+  `BROWSER`, `FILES`, `NOTIFY`, `EXECUTE`); the engine refuses any step whose
+  tool asks for more than the task was granted. The model choosing a tool cannot
+  widen its own access.
+- **Nexa yields to you.** It watches for navigations and form posts it did not
+  make. While you are using the browser, scheduled work waits instead of
+  navigating the page out from under you.
+- **One browser profile, one process.** A PID lock stops two instances sharing a
+  profile directory, which would otherwise log each other out of sites.
+- **No provider, no problem.** Without an API key the planner falls back to rules
+  and the app still creates watchers, runs schedules and drives browsers.
 
 ---
 
 ## Installation
 
-Requires **Node.js 20.10 or newer**.
+Requires **Node.js 20.10+**.
 
 ```bash
-cd bls-spain-monitor
+cd nexa
 npm install          # also runs "playwright install chromium"
 cp .env.example .env
+npm run dev          # build and open the app
 ```
 
-`config.json` is created for you from `config.example.json` on first run. Copy
-it yourself if you would rather edit it before starting:
-
-```bash
-cp config.example.json config.json
-```
-
-If the Chromium download was skipped:
-
-```bash
-npx playwright install chromium
-```
+`config.json` is created from `config.example.json` on first run.
 
 ---
 
-## First BLS login
+## Environment variables
 
-From the dashboard, press **Sign in to BLS**. From a terminal, `npm run login`
-does the same thing.
+Secrets live in `.env` (owner-only, gitignored) and never in `config.json`.
 
-1. Chromium opens on the BLS portal login page.
-2. **Type your user id and password in the browser**, never in this application.
-3. Complete the image CAPTCHA yourself.
-4. The monitor watches the page you already have open and, the moment you are
-   through, logs *"Verification completed in the browser. Resuming automatically."*
-   and carries on. You do not have to press Resume.
-5. The session stays in `data/sessions/bls-spain-lagos/` and survives restarts
-   until BLS expires it.
+| Variable | Purpose |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
+| `TELEGRAM_CHAT_ID` | Your numeric chat id; **only this chat may command Nexa** |
+| `ANTHROPIC_API_KEY` | Anthropic provider |
+| `OPENAI_API_KEY` | OpenAI or any compatible server |
+| `OPENAI_BASE_URL` | Base URL for Ollama, vLLM, LM Studio, … |
+| `LOG_LEVEL` | `trace` … `fatal`, default `info` |
 
-### Why there is no password field
-
-The dashboard has no place to type your BLS password, and there is no IPC
-channel that would accept one. That is deliberate, and it is not only a policy
-choice. Automated login could not work here anyway:
-
-- the login form renders ten decoy user-id and password inputs (`UserId1..10`,
-  `Password1..10`), only one pair of which is real;
-- it ships a scrambled on-screen keyboard;
-- the Login button stays hidden until an image CAPTCHA (*"select all boxes with
-  number …"*) is solved through `btnVerify`;
-- the post has to carry a matching `CaptchaId`, `ScriptData` and
-  `__RequestVerificationToken`.
-
-Those controls exist to stop automation. This application does not defeat them,
-and a stored password would stop at the same CAPTCHA box while adding a real
-secret to your disk for nothing. Type it in the browser; that is the one step
-that has to be yours.
-
-**What the application does instead:** it keeps a persistent browser profile, so
-you sign in rarely, and it resumes on its own the moment you are done.
+All of these can also be set from **Settings** in the app, which writes them to
+`.env` with `chmod 600`. They are never displayed again and never logged.
 
 ---
 
-## Telegram configuration
+## AI provider setup
 
-### From the dashboard (easiest)
+Settings → AI provider. Pick Anthropic or an OpenAI-compatible endpoint, set a
+model, paste a key.
 
-Press **Set up Telegram** in the Notifications card. The panel walks you through
-it and saves for you:
+The provider is used for planning, tool selection, ranking, summarising and
+writing reports. Without one, Nexa plans with rules: it still handles "watch
+this page", "research X", "do it every morning", and browser workflows, but
+loses free-form phrasing and model-quality summaries. `npm run doctor` tells you
+which mode you are in.
+
+---
+
+## Telegram setup
 
 1. Message [@BotFather](https://t.me/BotFather), send `/newbot`, copy the token.
-2. Message [@userinfobot](https://t.me/userinfobot), copy your numeric chat ID.
-3. Send your own new bot any message once, so it is allowed to write to you.
-4. Paste both into the panel and press **Save and verify**.
+2. Message [@userinfobot](https://t.me/userinfobot) for your numeric chat id.
+3. Send your own bot one message so it is allowed to write to you.
+4. Paste both into Settings → Telegram and press **Save and verify**.
 
-Saving writes the credentials to your `.env` file with owner-only permissions
-(`chmod 600`), calls Telegram's `getMe` to confirm they work, and reports the bot
-name back. The token is never displayed again, never logged, and never sent back
-to the dashboard. **Send test message** posts a real message to your chat.
+Telegram then becomes a full remote control:
 
-Both fields are validated before anything is written: the chat ID must be
-numeric, and the token must match Telegram's `123456789:AA...` shape.
-
-These are credentials for a bot you own, which is why the application can hold
-them. Your BLS password is different, and is never entered anywhere in this
-application.
-
-### By hand
-
-```dotenv
-TELEGRAM_BOT_TOKEN=123456789:AA...
-TELEGRAM_CHAT_ID=987654321
+```
+Find 5 interesting remote AI jobs and send me the results.
+Do that every morning at 8am.
+Watch https://example.com/pricing and tell me when it changes.
+Show me my active tasks.
+Pause the job search.
+Resume it.
+Stop everything.
 ```
 
-Then verify with:
+Commands also work: `/start /help /status /tasks /watches /pause /resume /cancel`.
 
-```bash
-npm run test:telegram
-```
+Approvals and takeovers arrive as inline buttons: **Approve / Reject**, or
+**Open browser / Resume / Cancel**.
 
-For a packaged build the file lives at
-`~/Library/Application Support/bls-spain-monitor/.env`.
+Messages from any chat id other than yours are refused.
 
 ---
 
-## Configuration
+## Browser profiles
 
-`config.json` holds your own application details and is **gitignored**. The
-repository ships `config.example.json` instead; the first run copies it into
-place, so a fresh clone starts with working defaults and your visa type, date
-window and applicant count never leave your machine.
+Each profile is a separate persistent browser session with its own cookies,
+stored under `data/profiles/<id>/`. Sign in once in a profile and later tasks
+reuse that session.
 
-`config.json`:
+Nexa runs stock Chromium with no stealth plugins and no fingerprint patching.
+When a site blocks automation, that is treated as a signal to ask you, not a
+problem to engineer around.
 
-```json
-{
-  "bls": {
-    "enabled": true,
-    "country": "Spain",
-    "applicationCountry": "Nigeria",
-    "city": "Lagos",
-    "centre": "Lagos",
-    "visaType": "Short Stay",
-    "visaSubCategory": "Tourist",
-    "applicantType": "Individual",
-    "memberCount": 1,
-    "preferredDateFrom": "",
-    "preferredDateTo": "",
-    "preferredTimeFrom": "",
-    "preferredTimeTo": "",
-    "intervalMinSeconds": 180,
-    "intervalMaxSeconds": 360
-  },
-  "notifications": { "telegram": true, "desktop": true, "sound": true }
-}
-```
+---
 
-| Option | Meaning |
+## Task examples
+
+| Ask | What Nexa builds |
 | --- | --- |
-| `visaType` | Matched case-insensitively against the category names BLS currently shows. Default `Tourist`, the short-stay category on the current site. If it is not offered, you get `VISA_CATEGORY_NOT_FOUND`, another category is never substituted. |
-| `visaSubCategory` | Second-level dropdown, when the form has one (e.g. type `Short Stay` + category `Tourist`). Default `Tourist`. Empty means the portal only asks once. |
-| `applicantType` | `Individual`, `Family` or `Group`. BLS schedules these separately, so getting it wrong means watching the wrong availability. |
-| `memberCount` | Number of applicants on the booking. Must be 1 for `Individual` and at least 2 for `Family` / `Group`; the schema rejects anything else rather than guessing. |
-| `preferredDateFrom` / `preferredDateTo` | `YYYY-MM-DD`. Empty means no bound. Slots outside the window do not raise an alert. |
-| `preferredTimeFrom` / `preferredTimeTo` | `HH:mm`, 24h. Empty means no bound. A slot whose time the site did not show is kept, so a real appointment is never hidden. |
-| `intervalMinSeconds` / `intervalMaxSeconds` | Randomised polling range. **180 seconds is a hard floor**; a lower value is rejected by the config validator, not silently clamped. |
-| `manualCheckCooldownSeconds` | Cooldown on the CHECK NOW button. Default 90. |
-| `headless` | Default `false`. Leave it that way, you cannot complete a CAPTCHA you cannot see. |
+| "Research the latest AI agent frameworks and summarise" | search → analyse → report |
+| "Find 5 remote AI jobs that match my profile" | search (profile-aware) → rank → report |
+| "Watch example.com/pricing and tell me when it changes" | watcher, every 6h, keyword-filtered |
+| "Open example.com every Friday and send me the headlines" | browser workflow, weekly |
+| "Summarise new documents in my notes folder" | file scan → analyse → report |
+| "Every morning at 8am send me an AI news brief" | recurring research task |
 
-`city` and `centre` are locked to `Lagos` by the Zod schema. There is no Abuja
-configuration and no centre selector.
-
-### Editing from the dashboard
-
-You do not have to touch `config.json` by hand. The **Application details** panel
-edits every one of these fields (visa type, category, Individual / Family /
-Group, number of applicants, the date and time windows, the polling interval and
-the notification channels) and writes them back to `config.json`.
-
-**Visa type** and **Category** are dropdowns, not free text. They start from the
-categories published on nigeria.blsspainvisa.com, and every list keeps a
-`Custom...` entry for wording that is not there.
-
-Press **Load lists from BLS** to replace them with exactly what your own account
-is offered: the adapter opens your booking page and reads the real dropdowns
-(read-only, it selects nothing and books nothing), then caches them in
-`data/state/bls-options.json`. It needs you to be signed in; if you are not, it
-says so and opens the login page instead of guessing.
-
-A value you have already saved always stays selectable, even if neither list
-mentions it, so your configuration is never silently dropped.
-
-Saving runs the same Zod schema the file does, and the failure comes back to the
-form as one readable line, e.g.:
-
-```
-memberCount: a Family appointment needs at least 2 applicants
-intervalMinSeconds: Number must be greater than or equal to 180
-preferredDateTo: preferredDateTo must be on or after preferredDateFrom
-```
-
-Changes apply to the next check; nothing needs restarting. **Revert** reloads the
-saved values. `city` and `centre` are forced back to Lagos on every save, no
-matter what the form sends.
-
-Everything is validated on load; a bad config fails loudly with the offending
-field named.
+Your profile (Settings → Your profile) feeds the career and learning tasks:
+skills, technologies, preferred and excluded roles, remote preference, salary
+floor. Nothing is hard-coded.
 
 ---
 
-## Running
+## Watcher examples
 
-| Command | What it does |
-| --- | --- |
-| `npm run dev` | Build, then launch the Electron dashboard |
-| `npm run build` | Compile TypeScript and copy UI assets to `dist/` |
-| `npm start` | Launch the dashboard from an existing build |
-| `npm run login` | Manual login in the persistent profile |
-| `npm run monitor` | Headless-of-Electron monitoring loop in the terminal |
-| `npm run check` | One availability check, prints the normalised result |
-| `npm run diagnostics` | Health report (browser, site, session, Lagos, category, notifications) |
-| `npm run package` | Build a distributable desktop app into `release/` |
-| `npm run icon` | Regenerate the application icon |
-| `npm test` | Unit tests (no network) |
-| `npm run test:telegram` | Verify the bot and send a test message |
-| `npm run lint` | ESLint |
+A watcher stores a normalised snapshot and compares future readings against it.
 
-### The dashboard
-
-`npm run dev` opens the window: a status board (state, last check, next check,
-interval), the register of counters, session and notification state, the
-**Application details** form, and a live event log.
-
-Controls: **Check now** (with cooldown), **Start / Pause / Resume monitoring**,
-**Sign in to BLS**, **Open browser**, **Screenshots**, **Set up Telegram** and
-**Load lists from BLS**.
-
-It ships a light theme by default, with dark and system available from the
-switch in the masthead; the choice is remembered. Type is self-hosted (Fraunces
-and IBM Plex Mono are bundled), so the dashboard renders identically offline and
-makes no network request of its own, the renderer runs under a strict CSP with
-`default-src 'none'`.
-
----
-
-## What the BLS portal actually allows (read this first)
-
-Verified against the live site with a signed-in session in September 2026:
-
-| Route | What it is |
-| --- | --- |
-| `/Global/account/login` | Sign-in. Decoy field grid, scrambled keyboard, image CAPTCHA. **A GET here while signed in ends your session**, so this application only opens it when you press *Sign in to BLS*. |
-| `/Global/blsappointment/MyAppointments` | Your existing bookings. Safe to poll. Used as the entry point for every check. |
-| `/Global/bls/visatypeverification` | "Book New Appointment", the only door into the booking funnel. |
-
-That last page is the constraint. Signed in, it contains exactly this and
-nothing else:
-
-```html
-<input id="CaptchaData" type="hidden">
-<button id="btnVerify" onclick="VerifyCaptcha();">Verify Selection</button>
-<button id="btnVerified" style="display:none">Verified</button>
-<button id="btnSubmit"  style="display:none">Submit</button>
-```
-
-No visa dropdowns, no centre, no calendar. Those render only after a person
-solves the image challenge behind *Verify Selection*.
-
-**So unattended, indefinite polling of appointment availability is not possible
-on this portal, and this application will not make it possible.** It does not
-solve that challenge. What it does instead:
-
-1. Walks to the gate on its own and recognises it (`CAPTCHA_REQUIRED`, matched
-   on `#btnVerify`), captures a screenshot, and alerts you on Telegram, desktop
-   and speaker.
-2. Pauses, leaving Chromium open on the exact page.
-3. Watches that page while you solve the challenge, and resumes by itself the
-   moment you are through.
-4. Keeps polling for as long as BLS honours that verification, and alerts you
-   again the next time it asks.
-
-How long a solved verification lasts is BLS's decision, not something this
-project can control or extend. The event log shows each gate as it happens, so
-you will see the real cadence after a day of use.
-
-If a tool promises you unattended BLS booking, it is solving those CAPTCHAs.
-This one does not.
-
----
-
-## How monitoring works
-
-1. Navigate to `/Global/blsappointment/MyAppointments`, never to the login
-   route. A dead session bounces towards login over **plain http** on a port
-   that does not answer; the adapter watches for that redirect and reports
-   `LOGIN_REQUIRED` within a second or two instead of hanging, and refuses to
-   open the login route itself because that would end a live session.
-2. Check the gates in order: site error → human verification → MFA → login.
-   Any hit stops the run and returns that status.
-3. Navigate to the appointment area and enter the booking flow.
-4. Select **Lagos**, then verify the control really reads Lagos. If it cannot be
-   selected, raise `LAGOS_SELECTION_ERROR`. Abuja is never selected, there is an
-   explicit assertion against it.
-5. Select the configured visa category, or raise `VISA_CATEGORY_NOT_FOUND`.
-6. Harvest every visible, non-disabled slot element, normalise dates and times.
-7. Decide:
-   - slots parsed → `AVAILABLE`
-   - explicit "no appointments" wording → `NOT_AVAILABLE`
-   - anything else → `WebsiteStructureChangedError`
-8. Apply the date/time filters. Slots outside your window do not alert.
-9. Schedule the next poll: 3-6 min normally, 5-10 min after 1-2 consecutive
-   errors, 10-20 min after 3 or more. A successful check resets it.
-
-### When an appointment is found
-
-Monitoring stops immediately. The browser stays open on the page, a screenshot
-is saved, Telegram / desktop / sound alerts fire, the Chromium window is raised
-and the dashboard switches to the appointment view. **You complete the booking.**
-
-### CAPTCHA / manual takeover
-
-When human verification, a login wall, an OTP prompt or an expired session is
-detected:
-
-1. Monitoring pauses. Nothing on the challenge is read, filled or clicked.
-2. A screenshot lands in `data/screenshots/bls-spain-lagos/`.
-3. Telegram, desktop and sound alerts fire.
-4. The dashboard shows **Manual verification required** with **Open browser** and
-   **Resume monitoring**.
-5. A watcher starts. Every six seconds it re-reads the page **that is already
-   open**, no navigation, no extra requests to BLS, and as soon as the
-   challenge is gone and the session looks authenticated it logs *"Verification
-   completed in the browser. Resuming automatically."* and continues.
-
-So in practice: solve the box, and go back to what you were doing. The Resume
-button is still there if you would rather drive it yourself.
-
-### Website structure changes
-
-If the appointment page cannot be interpreted safely, the monitor saves a
-screenshot plus the URL, page title and a bounded excerpt of the visible text,
-logs the error, and, after three consecutive occurrences, pauses and notifies
-you. It never reports "no appointments" in this situation.
-
----
-
-## Screenshots
-
-Saved to `data/screenshots/bls-spain-lagos/` as
-`YYYY-MM-DD_HH-mm-ss_event.png` for: appointment found, CAPTCHA, login required,
-session expired, unexpected page, site error, structure change, Lagos selection
-error, visa category not found, and diagnostics runs.
-
----
-
-## Packaging a desktop app
-
-```bash
-npm run icon      # regenerates build/icon.icns from the SVG in scripts/make-icon.mjs
-npm run package   # builds, then produces release/ artifacts
-```
-
-On macOS this writes `release/BLS Spain Lagos Monitor-1.0.0.dmg`, a matching
-`.zip`, and `release/mac/BLS Spain Lagos Monitor.app`. Windows (`nsis`) and Linux
-(`AppImage`) targets are configured too, though only the macOS build has been
-exercised here.
-
-The build is **unsigned** (`identity: null`), so the first launch needs
-right-click → Open, or `xattr -dr com.apple.quarantine "BLS Spain Lagos Monitor.app"`.
-
-A packaged app cannot write inside its own bundle, so `src/main/appPaths.ts`
-redirects the editable files to `~/Library/Application Support/bls-spain-monitor/`:
+It **ignores**: timestamps, relative times ("5 minutes ago"), session ids,
+UUIDs, hashes and cache-busting query strings. It **reports**: genuine content
+changes, optionally filtered to keywords so an unrelated edit on a busy page
+stays quiet.
 
 ```
-config.json          seeded from the bundled default on first run
-.env                 put your Telegram credentials here for the packaged app
-data/sessions/…      the persistent BLS profile
-data/screenshots/…   data/logs/   data/state/
+watch https://example.com/pricing and tell me when the price changes
 ```
 
-Development runs are unaffected, they keep using the project folder.
-
-Playwright is unpacked from the asar archive so Chromium can still be launched
-from inside the bundle. Chromium itself is **not** bundled; it comes from the
-shared `~/Library/Caches/ms-playwright` install, so run
-`npx playwright install chromium` once on any machine that has not got it.
-
----
-
-## Troubleshooting
-
-| Symptom | What to do |
-| --- | --- |
-| `Persistent session: ✗ not configured` | Press **Sign in to BLS**, or run `npm run login`. |
-| Always `LOGIN_REQUIRED` | The BLS session expired. Press **Sign in to BLS** and sign in again. |
-| "Can I save my password in the app?" | No, see *Why there is no password field*. The login is CAPTCHA-gated, so a stored password would not get you past it. |
-| `APPLICANT_SELECTION_ERROR` | The Individual / Family / Group value or the applicant count could not be set. The message lists what BLS actually offered. |
-| macOS: "app is damaged / unidentified developer" | The build is unsigned. Right-click → Open, or `xattr -dr com.apple.quarantine`. |
-| `CAPTCHA_REQUIRED` immediately | Complete the verification in the open Chromium window, then resume. This is expected behaviour, not a bug. |
-| `SITE_UNAVAILABLE` repeatedly | BLS is down or rate limiting. The backoff will slow polling automatically; leave it running. |
-| `WEBSITE STRUCTURE MAY HAVE CHANGED` | BLS changed the page. See the screenshot and the log, then update `src/bls/BlsSelectors.ts`. |
-| `LAGOS_SELECTION_ERROR` | Lagos is not in the centre list on that page. Check the screenshot; the monitor refuses to continue rather than pick another centre. |
-| `VISA_CATEGORY_NOT_FOUND` | The diagnostics output lists the categories BLS actually offers; copy one into `visaType`. |
-| Chromium will not start | `npx playwright install chromium`. |
-| Telegram silent | `npm run test:telegram`. Remember to `/start` your bot once. |
-
-Logs: `data/logs/monitor.log`. Event history: `data/state/events.jsonl`.
-
----
-
-## Diagnostics
-
-```bash
-npm run diagnostics
-```
-
-Reports Playwright availability, BLS reachability, the persistent session,
-authentication state, appointment-page access, whether Lagos is offered, whether
-your visa category exists, and the notification channels. Read-only: it never
-logs in, never touches a CAPTCHA and never books.
-
-Exit codes: `0` healthy, `1` needs your attention, `2` broken.
+First check is a baseline, never an alert. The interval floor
+(`agent.minWatchIntervalSeconds`, default 300s) applies to every watcher, and an
+over-eager request is raised to it rather than accepted.
 
 ---
 
 ## Security
 
-`.gitignore` covers `.env`, `data/sessions/`, `data/screenshots/`,
-`data/logs/`, `node_modules/` and `dist/`.
-
-- The BLS password is never requested, stored or logged. It only ever exists in
-  the browser window you type it into.
-- Authentication material lives solely inside Playwright's own profile
-  directory. The state file holds operational data only.
-- The Pino logger redacts passwords, cookies, tokens, OTPs, CAPTCHA fields,
-  `__RequestVerificationToken`, passport and payment keys at every nesting level.
-- URLs are logged with their query strings stripped.
-- Telegram errors are scrubbed of anything token-shaped before they are recorded.
-- The Electron renderer runs with context isolation on and no Node integration;
-  its only capability is the narrow IPC surface in `src/main/preload.ts`, and
-  screenshot opening is restricted to the screenshot directory.
+- Telegram is restricted to your chat id; anything else is refused and logged.
+- Secrets are environment-only, written `chmod 600`, never echoed to the UI.
+- The logger redacts passwords, tokens, cookies, API keys and OTPs at every
+  nesting level; URLs are logged with query strings stripped.
+- The file tool refuses any path outside your allowed folders, traversal
+  included, and declines binary formats rather than returning garbage.
+- Tasks carry explicit permissions; a tool needing more is refused.
+- Mutating steps require approval when `requireApprovalForWrites` is on.
+- The renderer runs with context isolation, no Node integration, and a strict
+  CSP (`default-src 'none'`). Its only capability is the IPC surface in
+  `src/main/preload.ts`, and evidence files open only from Nexa's own directory.
 
 ---
 
-## Updating selectors when BLS changes
+## Demo mode
 
-Everything BLS-specific is in `src/bls/BlsSelectors.ts`.
+Settings → Agent behaviour → Demo mode. Nexa plans and executes exactly as
+usual, but research and browser steps are simulated locally and **every result is
+labelled `[SIMULATED]`**. Nothing is contacted.
 
-1. Run `npm run diagnostics` and look at the screenshot it saves.
-2. Open the page yourself in the monitor's Chromium (`npm run login`) and inspect
-   the control that broke.
-3. Add a new strategy to the relevant array, **prepend** it so it is tried
-   first, and leave the old one as a fallback:
+It exists to demonstrate the whole flow — natural-language task creation,
+planning, execution, analysis, notification, approval, takeover, history and
+evidence — without depending on the network. Simulated output is never presented
+as real.
 
-   ```ts
-   export const LOCATION_CONTROLS: SelectorStrategy[] = [
-     { kind: 'role', role: 'combobox', name: /application centre/i }, // new
-     { kind: 'label', text: /location|centre|center|city|office/i },  // existing
-     // …
-   ];
-   ```
+---
 
-   Prefer roles, labels, form names and visible text. Avoid positional selectors
-   such as `button:nth-child(5)`.
-4. If the wording for "no appointments" changed, add the new phrasing to
-   `NO_APPOINTMENT_PATTERNS`, the monitor will report a structure change rather
-   than a false "no appointments" until you do.
-5. Add a fixture under `tests/fixtures/` reproducing the new markup and a test
-   asserting the behaviour, then `npm test`.
+## Development
+
+```bash
+npm run dev           # build and launch the desktop app
+npm run build         # compile TypeScript, copy UI assets
+npm start             # launch from an existing build
+npm run agent -- "…"  # run one request headlessly, follow it to completion
+npm run doctor        # what is configured, what is missing
+npm run test          # unit tests (no network)
+npm run lint          # ESLint
+npm run typecheck     # tsc --noEmit
+npm run package       # build a distributable desktop app into release/
+```
+
+Adding a tool is the main extension point: implement the `Tool` interface
+(`name`, `description`, `inputSchema`, `permissions`, `mutating`, `execute`) and
+register it in `NexaAgent.registerTools()`. The planner picks it up
+automatically, because its catalogue is generated from the registry.
 
 ---
 
@@ -555,20 +274,30 @@ Everything BLS-specific is in `src/bls/BlsSelectors.ts`.
 npm test
 ```
 
-91 unit tests covering the availability parser, date and time filtering, state
-transitions, CAPTCHA detection, login and session-expiry detection, site-error
-detection, error mapping and retry, the scheduler and its backoff, Telegram
-message formatting, configuration validation (including the refusal of any
-non-Lagos centre), and availability normalisation.
+81 tests across the task state machine, recurrence maths, watcher change
+detection and noise filtering, the planner (control intents, rule planning,
+schedule parsing), the task engine (retries, approvals, takeover, permission
+refusal, crash recovery), the tool registry, the file sandbox, Telegram
+send/receive/button handling and token redaction, and JSON extraction from
+model output.
 
-Tests run against HTML fixtures in `tests/fixtures/` and a stubbed `fetch`.
-**No test contacts BLS or Telegram.**
+Tests run against a scratch data directory and stubbed network. **No test
+contacts the internet.**
+
+The restart scenario is covered explicitly: create a task, simulate a crash
+mid-run, build a fresh engine over the same files, confirm the task survived,
+was requeued, and then completes.
 
 ---
 
-## Scope
+## Roadmap
 
-Version 1 supports BLS Spain, Nigeria, Lagos, one account, monitoring only. No
-Abuja, no other countries, no other providers, no automatic booking, no
-payments. The layering, adapter, detector, parser, notifier, is where you would
-add more later.
+**Now**: task engine, orchestrator, watchers, browser workflows, Telegram
+control, approvals, human takeover, evidence, persistence, demo mode.
+
+**Next**: richer file intelligence (PDF and DOCX), agent memory across tasks,
+multiple concurrent tasks, more watcher types, a daily briefing digest.
+
+**Later**: the architecture is deliberately local-first, but the layering
+(agent → engines → tools) is designed so execution could move to a remote
+worker, with multiple users and shared workflows, without rewriting the core.

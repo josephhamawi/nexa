@@ -1,10 +1,7 @@
-import { TelegramNotifier } from './TelegramNotifier';
+import { TelegramNotifier, type InlineButton } from './TelegramNotifier';
 import { DesktopNotifier } from './DesktopNotifier';
 import { SoundNotifier } from './SoundNotifier';
-import type { AvailabilityResult } from '../availability/AvailabilityResult';
-import { AvailabilityStatus, describeStatus } from '../availability/AvailabilityState';
 import type { NotificationsConfig } from '../config/schema';
-import { formatClock, formatDateLong } from '../utils/time';
 import { childLogger } from '../logging/logger';
 
 const log = childLogger('notifications');
@@ -21,9 +18,7 @@ export interface NotificationChannelStatus {
   sound: 'enabled' | 'disabled';
 }
 
-const HEADER = '\u{1F1EA}\u{1F1F8} Spain\n\u{1F4CD} Lagos, Nigeria';
-
-/** Fans a single event out to Telegram, the desktop and the speaker. */
+/** Fans one event out to Telegram, the desktop and the speaker. */
 export class NotificationManager {
   readonly telegram: TelegramNotifier;
   readonly desktop: DesktopNotifier;
@@ -33,6 +28,10 @@ export class NotificationManager {
     this.telegram = new TelegramNotifier(config.telegram);
     this.desktop = new DesktopNotifier(config.desktop);
     this.sound = new SoundNotifier(config.sound);
+  }
+
+  updateConfig(config: NotificationsConfig): void {
+    this.config = config;
   }
 
   status(): NotificationChannelStatus {
@@ -47,127 +46,131 @@ export class NotificationManager {
     };
   }
 
-  /** Appointment found: the alert this whole application exists for. */
-  async appointmentFound(result: AvailabilityResult): Promise<NotificationOutcome> {
-    const slot = result.appointments[0];
-    const detectedAt = formatClock(new Date(result.checkedAt));
-    const dateLine = slot ? formatDateLong(slot.date) : 'see the browser';
-    const timeLine = slot?.time ?? '-';
-
-    const extra =
-      result.appointments.length > 1
-        ? `\n\n+${result.appointments.length - 1} more slot${
-            result.appointments.length > 2 ? 's' : ''
-          } visible`
-        : '';
-
-    const telegramText =
-      `\u{1F6A8} BLS SPAIN APPOINTMENT AVAILABLE\n\n` +
-      `${HEADER}\n\n` +
-      `Visa:\n${result.visaType}\n\n` +
-      `Date:\n${dateLine}\n\n` +
-      `Time:\n${timeLine}\n\n` +
-      `Detected:\n${detectedAt}${extra}\n\n` +
-      `The browser is open.\nComplete the booking manually.`;
-
+  /** A finished task's output. The everyday case, so no sound. */
+  async report(input: { title: string; body: string; chatId?: string | null }): Promise<NotificationOutcome> {
     return this.dispatch({
-      telegramText,
-      desktopTitle: '\u{1F6A8} BLS Spain appointment available',
-      desktopBody: `Lagos, Nigeria\n${dateLine}${slot?.time ? `, ${slot.time}` : ''}\n\nOpen the browser to continue.`,
-      urgent: true,
-      soundRepeats: 5,
+      telegramText: `${input.title}\n\n${input.body}`,
+      chatId: input.chatId ?? null,
+      desktopTitle: input.title,
+      desktopBody: input.body.slice(0, 220),
+      urgent: false,
+      soundRepeats: 0,
     });
   }
 
-  /** CAPTCHA, login or MFA: the user has to take over the browser. */
-  async manualActionRequired(result: AvailabilityResult): Promise<NotificationOutcome> {
-    const isLogin =
-      result.status === AvailabilityStatus.LOGIN_REQUIRED ||
-      result.status === AvailabilityStatus.SESSION_EXPIRED;
-
-    const headline = isLogin
-      ? '\u{1F1EA}\u{1F1F8} BLS Spain Lagos requires login.'
-      : '⚠ BLS Spain Lagos needs human verification.';
-
-    const telegramText =
-      `${headline}\n\n` +
-      `${HEADER}\n\n` +
-      `${result.message}\n\n` +
-      `Monitoring is paused.\n` +
-      `Complete the step in Chromium, then press RESUME MONITORING.`;
+  /** Something needs a person. Worth making noise about. */
+  async humanNeeded(input: {
+    taskName: string;
+    reason: string;
+    taskId: string;
+    chatId?: string | null;
+  }): Promise<NotificationOutcome> {
+    const buttons: InlineButton[][] = [
+      [
+        { text: 'Open browser', data: `open:${input.taskId}` },
+        { text: 'Resume', data: `resume:${input.taskId}` },
+      ],
+      [{ text: 'Cancel task', data: `cancel:${input.taskId}` }],
+    ];
 
     return this.dispatch({
-      telegramText,
-      desktopTitle: isLogin ? 'BLS Spain: login required' : 'BLS Spain: verification required',
-      desktopBody: `Lagos, Nigeria\n${result.message}\n\nMonitoring is paused.`,
+      telegramText:
+        `Nexa needs your help with "${input.taskName}".\n\n${input.reason}\n\n` +
+        'Finish the step in the browser, then press Resume.',
+      chatId: input.chatId ?? null,
+      buttons,
+      desktopTitle: 'Nexa needs your help',
+      desktopBody: `${input.taskName}\n${input.reason}`,
       urgent: true,
       soundRepeats: 3,
     });
   }
 
-  /** Repeated failures or a structure change that needs a human look. */
-  async attentionRequired(title: string, detail: string): Promise<NotificationOutcome> {
-    const telegramText = `⚠ ${title}\n\n${HEADER}\n\n${detail}`;
+  /** A consequential step is queued and waiting for a yes. */
+  async approvalNeeded(input: {
+    taskName: string;
+    reason: string;
+    taskId: string;
+    chatId?: string | null;
+  }): Promise<NotificationOutcome> {
+    const buttons: InlineButton[][] = [
+      [
+        { text: 'Approve', data: `approve:${input.taskId}` },
+        { text: 'Reject', data: `reject:${input.taskId}` },
+      ],
+    ];
+
     return this.dispatch({
-      telegramText,
-      desktopTitle: `BLS Spain: ${title}`,
-      desktopBody: detail,
+      telegramText: `Approval needed for "${input.taskName}".\n\n${input.reason}`,
+      chatId: input.chatId ?? null,
+      buttons,
+      desktopTitle: 'Nexa is waiting for approval',
+      desktopBody: `${input.taskName}\n${input.reason}`,
       urgent: true,
       soundRepeats: 2,
     });
   }
 
-  /** Low-priority status change: Telegram only, no sound. */
-  async info(message: string): Promise<NotificationOutcome> {
+  /** A watcher saw something change. */
+  async watcherChanged(input: {
+    watcherName: string;
+    target: string;
+    summary: string;
+    chatId?: string | null;
+  }): Promise<NotificationOutcome> {
     return this.dispatch({
-      telegramText: `${HEADER}\n\n${message}`,
-      desktopTitle: 'BLS Spain Lagos',
-      desktopBody: message,
-      urgent: false,
-      soundRepeats: 0,
+      telegramText: `Change detected: ${input.watcherName}\n\n${input.target}\n\n${input.summary}`,
+      chatId: input.chatId ?? null,
+      desktopTitle: `Change: ${input.watcherName}`,
+      desktopBody: input.summary.slice(0, 220),
+      urgent: true,
+      soundRepeats: 2,
+    });
+  }
+
+  async taskFailed(input: { taskName: string; error: string; chatId?: string | null }): Promise<NotificationOutcome> {
+    return this.dispatch({
+      telegramText: `Task failed: ${input.taskName}\n\n${input.error}`,
+      chatId: input.chatId ?? null,
+      desktopTitle: `Nexa: ${input.taskName} failed`,
+      desktopBody: input.error.slice(0, 220),
+      urgent: true,
+      soundRepeats: 1,
     });
   }
 
   async test(): Promise<NotificationOutcome> {
     return this.dispatch({
       telegramText:
-        `✅ BLS Spain Lagos monitor test notification\n\n` +
-        `${HEADER}\n\n` +
-        `If you can read this, Telegram is configured correctly.\n` +
-        `Sent at ${formatClock()}.`,
-      desktopTitle: 'BLS Spain Lagos monitor',
+        'Nexa test notification.\n\nIf you can read this, Telegram is wired up correctly. ' +
+        'Send me something like "research the latest AI agent frameworks" to get started.',
+      chatId: null,
+      desktopTitle: 'Nexa',
       desktopBody: 'Test notification. Notifications are working.',
       urgent: false,
       soundRepeats: 1,
     });
   }
 
-  describeResult(result: AvailabilityResult): string {
-    return `${describeStatus(result.status)}: ${result.message}`;
-  }
-
   private async dispatch(input: {
     telegramText: string;
+    chatId: string | null;
+    buttons?: InlineButton[][];
     desktopTitle: string;
     desktopBody: string;
     urgent: boolean;
     soundRepeats: number;
   }): Promise<NotificationOutcome> {
     const [telegram, desktop, sound] = await Promise.all([
-      this.telegram.send(input.telegramText),
-      this.desktop.notify({
-        title: input.desktopTitle,
-        body: input.desktopBody,
-        urgent: input.urgent,
+      this.telegram.send(input.telegramText, {
+        chatId: input.chatId,
+        ...(input.buttons ? { buttons: input.buttons } : {}),
       }),
+      this.desktop.notify({ title: input.desktopTitle, body: input.desktopBody, urgent: input.urgent }),
       input.soundRepeats > 0 ? this.sound.alert(input.soundRepeats) : Promise.resolve(false),
     ]);
 
-    log.info(
-      { telegram: telegram.ok, desktop, sound },
-      'notification dispatched',
-    );
-
+    log.info({ telegram: telegram.ok, desktop, sound }, 'notification dispatched');
     return { telegram, desktop, sound };
   }
 }

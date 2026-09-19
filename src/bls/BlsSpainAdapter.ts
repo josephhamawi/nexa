@@ -86,13 +86,18 @@ export class BlsSpainAdapter {
    * errors are translated into explicit error statuses, never into
    * "no appointments available".
    */
-  async check(signal?: AbortSignal): Promise<AvailabilityResult> {
+  /**
+   * @param entryUrl Page to read instead of walking the funnel from the start.
+   *   Set once you have passed BLS's verification by hand and landed on a slot
+   *   page: re-walking the funnel would only hit the gate again.
+   */
+  async check(signal?: AbortSignal, entryUrl?: string | null): Promise<AvailabilityResult> {
     // Everything below is the monitor acting, so it must not be mistaken for
     // you using the browser.
-    return this.browser.runOwned(() => this.runCheck(signal));
+    return this.browser.runOwned(() => this.runCheck(signal, entryUrl));
   }
 
-  private async runCheck(signal?: AbortSignal): Promise<AvailabilityResult> {
+  private async runCheck(signal?: AbortSignal, entryUrl?: string | null): Promise<AvailabilityResult> {
     const page = await this.browser.getPage();
     this.trackLoginRedirects(page);
     this.loginRedirectSeen = false;
@@ -101,13 +106,16 @@ export class BlsSpainAdapter {
       // Straight to the appointment area. A dead session bounces towards the
       // login route, which navigate() turns into LOGIN_REQUIRED; we never open
       // that route ourselves, because doing so would end a live session.
-      const entryResponse = await this.navigate(page, BLS_URLS.entry, signal);
+      const target = entryUrl ?? BLS_URLS.entry;
+      const entryResponse = await this.navigate(page, target, signal);
       let snapshot = await this.snapshot(page, entryResponse?.status() ?? null);
 
       const gate = await this.evaluateGates(page, snapshot);
       if (gate) return gate;
 
-      snapshot = await this.enterBookingFlow(page, snapshot);
+      // A page reached past the verification already IS the appointment page,
+      // so walking the funnel again would only take us back to the gate.
+      if (!entryUrl) snapshot = await this.enterBookingFlow(page, snapshot);
 
       const gateAfterEntry = await this.evaluateGates(page, snapshot);
       if (gateAfterEntry) return gateAfterEntry;

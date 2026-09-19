@@ -22,7 +22,7 @@ export class MonitorWorker {
   }
 
   /** Returns null when a check is already in progress. */
-  async runOnce(): Promise<AvailabilityResult | null> {
+  async runOnce(entryUrl: string | null = null): Promise<AvailabilityResult | null> {
     if (this.inFlight) {
       log.debug('check skipped; another check is still running');
       return null;
@@ -31,7 +31,7 @@ export class MonitorWorker {
     this.controller = new AbortController();
     const signal = this.controller.signal;
 
-    this.inFlight = this.adapter.check(signal);
+    this.inFlight = this.adapter.check(signal, entryUrl);
 
     try {
       const result = await this.inFlight;

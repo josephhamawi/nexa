@@ -46,6 +46,15 @@ const log = childLogger('monitor');
  */
 const USER_ACTIVITY_GRACE_MS = 3 * 60_000;
 
+/** Consecutive clean polls before the watcher believes you are really through. */
+const TAKEOVER_STABLE_POLLS = 3;
+/** Quiet period required before resuming, so we never interrupt mid-form. */
+const TAKEOVER_QUIET_MS = 20_000;
+/** Minimum gap between two identical manual-action alerts. */
+const ALERT_REPEAT_MS = 10 * 60_000;
+/** Gates in a row before the monitor stops trying and waits for you. */
+const MAX_CONSECUTIVE_GATES = 3;
+
 export interface DashboardState {
   identity: {
     country: 'Spain';
@@ -113,6 +122,14 @@ export class MonitorManager extends EventEmitter {
   private structureFailures = 0;
   /** Polls the already-open page while you complete a CAPTCHA or a login. */
   private takeoverWatch: NodeJS.Timeout | null = null;
+  /** Consecutive watcher polls that looked clear of the gate. */
+  private takeoverCleanPolls = 0;
+  /** Page reached past BLS's verification; polled directly while it lasts. */
+  private postGateUrl: string | null = null;
+  /** Last manual-action alert, to stop the same gate paging you repeatedly. */
+  private lastAlertKey: { key: string; at: number } | null = null;
+  /** Verification gates hit back to back without a successful read between. */
+  private consecutiveGates = 0;
 
   constructor(config: AppConfig = loadConfig()) {
     super();
@@ -169,10 +186,12 @@ export class MonitorManager extends EventEmitter {
   }
 
   /** Resume after a CAPTCHA/login takeover, or after a manual pause. */
-  async resume(): Promise<void> {
+  async resume(options: { keepUserActivity?: boolean } = {}): Promise<void> {
     this.stopTakeoverWatch();
-    // Pressing Resume is you handing control back.
-    this.browser.clearUserActivity();
+    if (!options.keepUserActivity) this.consecutiveGates = 0;
+    // Pressing Resume is you handing control back. A watcher-driven resume is
+    // not, so it must not erase the fact that you were just using the browser.
+    if (!options.keepUserActivity) this.browser.clearUserActivity();
     this.structureFailures = 0;
     this.patch({
       runState: 'RUNNING',
@@ -373,7 +392,7 @@ export class MonitorManager extends EventEmitter {
 
     let result: AvailabilityResult | null;
     try {
-      result = await this.worker.runOnce();
+      result = await this.worker.runOnce(this.postGateUrl);
     } catch (err) {
       // The adapter converts its own failures into results; reaching here means
       // something outside it broke (browser crash, profile lock, …).
@@ -463,6 +482,19 @@ export class MonitorManager extends EventEmitter {
 
   private async handleManualAction(result: AvailabilityResult): Promise<void> {
     this.scheduler.cancel();
+
+    // If the remembered page has started demanding verification again, it is no
+    // longer a shortcut past the gate.
+    if (this.postGateUrl && result.status === AvailabilityStatus.CAPTCHA_REQUIRED) {
+      this.log('The saved appointment page is asking for verification again', 'warn');
+      this.postGateUrl = null;
+    }
+
+    if (result.status === AvailabilityStatus.CAPTCHA_REQUIRED) {
+      this.consecutiveGates += 1;
+    } else {
+      this.consecutiveGates = 0;
+    }
     this.patch({
       runState: 'PAUSED',
       currentStatus: result.status,
@@ -488,9 +520,27 @@ export class MonitorManager extends EventEmitter {
     );
     await this.browser.bringToFront();
 
-    const outcome = await this.notifications.manualActionRequired(result);
-    this.recordNotification(result.status.toLowerCase(), outcome.telegram.ok);
-    this.log('Telegram notification sent', outcome.telegram.ok ? 'info' : 'warn');
+    // The same gate can be hit repeatedly; alert once, not every few seconds.
+    if (this.shouldAlert(result.status)) {
+      const outcome = await this.notifications.manualActionRequired(result);
+      this.recordNotification(result.status.toLowerCase(), outcome.telegram.ok);
+      this.log('Telegram notification sent', outcome.telegram.ok ? 'info' : 'warn');
+    } else {
+      this.log('Same step still pending, not sending another alert', 'info');
+    }
+
+    // Repeatedly re-entering a funnel that gates every time is pointless and
+    // would keep pulling the page away from you. Stop and wait to be told.
+    if (this.consecutiveGates >= MAX_CONSECUTIVE_GATES) {
+      this.log(
+        `BLS asked for verification ${this.consecutiveGates} times in a row. ` +
+          'Monitoring is stopped: finish the booking steps yourself, then press Resume monitoring.',
+        'error',
+      );
+      this.patch({ runState: 'STOPPED', currentStatus: AvailabilityStatus.STOPPED });
+      this.emit('manual-action-required', result);
+      return;
+    }
 
     this.startTakeoverWatch();
     this.emit('manual-action-required', result);
@@ -507,6 +557,7 @@ export class MonitorManager extends EventEmitter {
    */
   private startTakeoverWatch(): void {
     this.stopTakeoverWatch();
+    this.takeoverCleanPolls = 0;
 
     const INTERVAL_MS = 6000;
     this.takeoverWatch = setInterval(() => {
@@ -521,16 +572,44 @@ export class MonitorManager extends EventEmitter {
 
         try {
           const snapshot = await this.adapter.snapshot(page, null);
-          if (detectHumanVerification(snapshot).detected) return;
-          if (detectLoginRequired(snapshot).detected) return;
-          if (!detectAuthenticated(snapshot).detected) return;
+
+          // Still at the gate, or on a login page: nothing to do yet.
+          if (detectHumanVerification(snapshot).detected || detectLoginRequired(snapshot).detected) {
+            this.takeoverCleanPolls = 0;
+            return;
+          }
+          if (!detectAuthenticated(snapshot).detected) {
+            // A blank or half-loaded frame looks like neither. Treat it as
+            // "not yet" instead of "done", which is what made the watcher
+            // resume mid-navigation and bounce the user out of the form.
+            this.takeoverCleanPolls = 0;
+            return;
+          }
+
+          // Do not cut in while you are still working.
+          if (this.browser.userActiveWithin(TAKEOVER_QUIET_MS)) {
+            this.takeoverCleanPolls = 0;
+            return;
+          }
+
+          this.takeoverCleanPolls += 1;
+          if (this.takeoverCleanPolls < TAKEOVER_STABLE_POLLS) return;
+
+          // Past the gate: remember this page and read it from now on, rather
+          // than walking the funnel again and landing straight back on it.
+          const url = snapshot.url;
+          if (url && !/visatypeverification/i.test(url) && !/\/account\//i.test(url)) {
+            this.postGateUrl = url;
+            this.log(`Will read this page from now on: ${url}`, 'info');
+          }
 
           this.stopTakeoverWatch();
           this.session.setStatus('AUTHENTICATED');
           this.log('Verification completed in the browser. Resuming automatically.', 'success');
-          await this.resume();
+          await this.resume({ keepUserActivity: true });
         } catch {
           // The page is mid-navigation; try again on the next tick.
+          this.takeoverCleanPolls = 0;
         }
       })();
     }, INTERVAL_MS);
@@ -544,6 +623,7 @@ export class MonitorManager extends EventEmitter {
       clearInterval(this.takeoverWatch);
       this.takeoverWatch = null;
     }
+    this.takeoverCleanPolls = 0;
   }
 
   private async handleError(result: AvailabilityResult): Promise<void> {
@@ -609,6 +689,16 @@ export class MonitorManager extends EventEmitter {
       lastError: { message, code, at: new Date().toISOString() },
       stats: { ...stats, errorsToday: stats.errorsToday + 1 },
     });
+  }
+
+  /** Rate-limits repeat alerts for a condition that has not changed. */
+  private shouldAlert(key: string): boolean {
+    const now = Date.now();
+    if (this.lastAlertKey && this.lastAlertKey.key === key && now - this.lastAlertKey.at < ALERT_REPEAT_MS) {
+      return false;
+    }
+    this.lastAlertKey = { key, at: now };
+    return true;
   }
 
   private recordNotification(channel: string, ok: boolean): void {

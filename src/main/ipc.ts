@@ -226,6 +226,15 @@ export function registerIpc(
       return { ok: false, error: `Could not write ${paths.env}: ${(err as Error).message}` };
     }
 
+    // Setting up a channel means wanting it on. Saving credentials only to be
+    // told "telegram disabled in config" is a pointless extra step.
+    const current = loadConfig(true);
+    if (!current.notifications.telegram) {
+      agent.applyConfig({ ...current, notifications: { ...current.notifications, telegram: true } });
+      bot.updateConfig(loadConfig(true).telegram);
+      log.info('telegram notifications enabled because credentials were saved');
+    }
+
     // getMe only proves the token is real. Sending a message is what proves the
     // chat id is reachable, which is the half that usually goes wrong.
     const verified = await agent.notifications.telegram.verify();

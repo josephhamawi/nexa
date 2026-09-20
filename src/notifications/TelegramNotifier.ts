@@ -73,9 +73,21 @@ export class TelegramNotifier {
   }
 
   async send(text: string, options: { chatId?: string | null; buttons?: InlineButton[][] } = {}): Promise<TelegramSendResult> {
-    if (!this.enabled) return { ok: false, skipped: true, error: 'telegram disabled in config' };
+    if (!this.enabled) {
+      return {
+        ok: false,
+        skipped: true,
+        error: 'Telegram is switched off. Turn it on under Settings, Agent behaviour, Notifications.',
+      };
+    }
     const creds = this.credentials();
-    if (!creds) return { ok: false, skipped: true, error: 'TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set' };
+    if (!creds) {
+      return {
+        ok: false,
+        skipped: true,
+        error: 'No Telegram credentials yet. Add a bot token and chat ID under Settings.',
+      };
+    }
 
     try {
       const result = (await this.call('sendMessage', {

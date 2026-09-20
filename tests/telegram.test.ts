@@ -57,11 +57,13 @@ describe('sending', () => {
     expect(JSON.parse(String(init.body)).text.length).toBe(4096);
   });
 
-  it('skips cleanly when disabled', async () => {
+  it('skips cleanly when disabled, and says where the switch is', async () => {
     const mock = stubTelegram(true);
     const result = await new TelegramNotifier(false).send('hello');
     expect(result.skipped).toBe(true);
     expect(mock).not.toHaveBeenCalled();
+    // A user reading this should know what to do, not just that it failed.
+    expect(result.error).toMatch(/Settings/);
   });
 
   it('never leaks the token in an error', async () => {

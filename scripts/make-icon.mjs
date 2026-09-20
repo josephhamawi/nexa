@@ -1,10 +1,11 @@
 /**
  * Generates the application icon.
  *
- * Renders an SVG mark in Playwright's Chromium (already a dependency), writes
- * a 1024px PNG, then builds build/icon.icns via sips + iconutil on macOS.
+ *   node scripts/make-icon.mjs        # default variant
+ *   node scripts/make-icon.mjs c      # pick another
  *
- *   node scripts/make-icon.mjs
+ * Renders the mark in Playwright's Chromium (already a dependency), writes a
+ * 1024px PNG, then builds build/icon.icns via sips + iconutil on macOS.
  */
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -17,59 +18,88 @@ const run = promisify(execFile);
 const root = path.resolve(import.meta.dirname, '..');
 const buildDir = path.join(root, 'build');
 
-/** The Nexa mark: an N whose diagonal carries a signal between two nodes. */
-const SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <defs>
-    <!-- Deep slate field, lit from the top left like a physical object -->
-    <linearGradient id="field" x1="0.15" y1="0" x2="0.85" y2="1">
-      <stop offset="0" stop-color="#27313f"/>
-      <stop offset="0.55" stop-color="#151c26"/>
-      <stop offset="1" stop-color="#0b0f15"/>
-    </linearGradient>
+/**
+ * The mark: a geometric N whose diagonal runs the full height.
+ *
+ * The diagonal must start at the very top of the left stem and finish at the
+ * very bottom of the right one. Stopping it short reads as a slash between two
+ * bars rather than a letter, which is the usual way this shape goes wrong.
+ */
+const L = 318;
+const R = 626;
+const W = 80;
+const TOP = 288;
+const BOT = 736;
+const THICK = 132;
 
-    <!-- The signal running through the mark -->
-    <linearGradient id="signal" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="#2f6fe0"/>
-      <stop offset="0.5" stop-color="#5b9bff"/>
-      <stop offset="1" stop-color="#8fc2ff"/>
-    </linearGradient>
+const stems = `
+  <rect x="${L}" y="${TOP}" width="${W}" height="${BOT - TOP}" rx="16"/>
+  <rect x="${R}" y="${TOP}" width="${W}" height="${BOT - TOP}" rx="16"/>`;
+const diagonal = `<polygon points="${L + W},${TOP} ${L + W},${TOP + THICK} ${R + W},${BOT} ${R + W},${BOT - THICK}"/>`;
 
-    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
-      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.02"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0.22"/>
-    </linearGradient>
+/** Light from above, shadow below: makes the tile read as a physical object. */
+const SHEEN = `
+  <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#fff" stop-opacity="0.26"/>
+    <stop offset="0.5" stop-color="#fff" stop-opacity="0.03"/>
+    <stop offset="1" stop-color="#000" stop-opacity="0.22"/>
+  </linearGradient>`;
 
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="18" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
+const tile = (fill, extra = '') => `
+  <rect x="96" y="96" width="832" height="832" rx="196" fill="${fill}"/>
+  <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#sheen)"/>${extra}`;
 
-  <!-- macOS-style squircle -->
-  <rect x="88" y="88" width="848" height="848" rx="196" fill="url(#field)"/>
-  <rect x="88" y="88" width="848" height="848" rx="196" fill="url(#edge)"/>
+const VARIANTS = {
+  /** Warm amber to crimson. Chosen because it survives a dock full of dark and
+   *  blue icons, which is where this one actually has to compete. */
+  b: `<defs>${SHEEN}
+      <linearGradient id="field" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#fcd34d"/>
+        <stop offset="0.45" stop-color="#f97316"/>
+        <stop offset="1" stop-color="#e11d48"/>
+      </linearGradient></defs>
+    ${tile('url(#field)')}
+    <g fill="#180d06">${stems}${diagonal}</g>`,
 
-  <!-- Faint grid: an instrument panel, not a toy -->
-  <g stroke="#ffffff" stroke-opacity="0.045" stroke-width="2">
-    <path d="M88 320h848M88 512h848M88 704h848M320 88v848M512 88v848M704 88v848"/>
-  </g>
+  /** Violet to blue, solid white mark. Calmer, more conventional. */
+  a: `<defs>${SHEEN}
+      <linearGradient id="field" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#8b5cf6"/>
+        <stop offset="0.5" stop-color="#4f46e5"/>
+        <stop offset="1" stop-color="#1d4ed8"/>
+      </linearGradient></defs>
+    ${tile('url(#field)')}
+    <g fill="#fff">${stems}${diagonal}</g>`,
 
-  <!-- The N: two uprights and a diagonal that carries the signal -->
-  <g>
-    <rect x="316" y="300" width="74" height="424" rx="16" fill="#e8eef6"/>
-    <rect x="634" y="300" width="74" height="424" rx="16" fill="#e8eef6"/>
-    <path d="M390 300 L390 404 L634 724 L634 620 Z" fill="url(#signal)" filter="url(#glow)"/>
-  </g>
+  /** Near-black with the diagonal lit like a signal in transit. */
+  c: `<defs>${SHEEN}
+      <linearGradient id="field" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#232b39"/><stop offset="1" stop-color="#05070c"/>
+      </linearGradient>
+      <linearGradient id="signal" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#a3e635"/>
+      </linearGradient>
+      <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur stdDeviation="16" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter></defs>
+    ${tile(
+      'url(#field)',
+      '<rect x="96" y="96" width="832" height="832" rx="196" fill="none" stroke="#a3e635" stroke-opacity="0.18" stroke-width="7"/>',
+    )}
+    <g fill="#eef2f7">${stems}</g>
+    <g fill="url(#signal)" filter="url(#glow)">${diagonal}</g>`,
+};
 
-  <!-- Nodes: the agent taking a step, acting, arriving -->
-  <circle cx="353" cy="300" r="34" fill="url(#signal)"/>
-  <circle cx="671" cy="724" r="34" fill="url(#signal)"/>
-  <circle cx="353" cy="300" r="15" fill="#0b0f15" fill-opacity="0.55"/>
-  <circle cx="671" cy="724" r="15" fill="#0b0f15" fill-opacity="0.55"/>
-</svg>
-`;
+const variant = (process.argv[2] ?? 'b').toLowerCase();
+const body = VARIANTS[variant];
+
+if (!body) {
+  console.error(`Unknown variant "${variant}". Available: ${Object.keys(VARIANTS).join(', ')}`);
+  process.exit(1);
+}
+
+const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">${body}</svg>`;
 
 async function main() {
   await mkdir(buildDir, { recursive: true });
@@ -82,7 +112,7 @@ async function main() {
   const png = path.join(buildDir, 'icon.png');
   await page.screenshot({ path: png, omitBackground: true });
   await browser.close();
-  console.log(`wrote ${path.relative(root, png)}`);
+  console.log(`wrote ${path.relative(root, png)} (variant ${variant})`);
 
   if (process.platform !== 'darwin') {
     console.log('not macOS, skipping .icns generation');
@@ -93,12 +123,10 @@ async function main() {
   await rm(iconset, { recursive: true, force: true });
   await mkdir(iconset, { recursive: true });
 
-  const sizes = [16, 32, 64, 128, 256, 512, 1024];
-  for (const size of sizes) {
-    const targets = [];
-    if (sizes.includes(size)) targets.push(`icon_${size}x${size}.png`);
-    if (size > 16) targets.push(`icon_${size / 2}x${size / 2}@2x.png`);
-    for (const name of targets) {
+  for (const size of [16, 32, 64, 128, 256, 512, 1024]) {
+    const names = [`icon_${size}x${size}.png`];
+    if (size > 16) names.push(`icon_${size / 2}x${size / 2}@2x.png`);
+    for (const name of names) {
       if (name.startsWith('icon_1024x1024.png')) continue; // not a valid iconset entry
       await run('sips', ['-z', String(size), String(size), png, '--out', path.join(iconset, name)]);
     }
@@ -108,9 +136,7 @@ async function main() {
   await rm(iconset, { recursive: true, force: true });
   console.log(`wrote ${path.relative(root, path.join(buildDir, 'icon.icns'))}`);
 
-  if (!existsSync(path.join(buildDir, 'icon.icns'))) {
-    throw new Error('icon.icns was not produced');
-  }
+  if (!existsSync(path.join(buildDir, 'icon.icns'))) throw new Error('icon.icns was not produced');
 }
 
 await writeFile(path.join(root, 'build', '.gitkeep'), '').catch(() => {});

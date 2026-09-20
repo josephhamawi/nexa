@@ -3,7 +3,7 @@
 import './appPaths';
 import path from 'node:path';
 import fs from 'node:fs';
-import { app, BrowserWindow, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, nativeImage, powerSaveBlocker, shell } from 'electron';
 import { ensureDataDirs, loadConfig, loadEnv } from '../config/config';
 import { childLogger, logger } from '../logging/logger';
 import { NexaAgent } from '../agent/NexaAgent';
@@ -15,6 +15,8 @@ const log = childLogger('main');
 let window: BrowserWindow | null = null;
 let agent: NexaAgent | null = null;
 let bot: TelegramBot | null = null;
+/** Held only while there is work pending, so an idle Nexa costs nothing. */
+let powerBlockerId: number | null = null;
 
 /** Single instance only: two agents would fight over the browser profiles. */
 if (!app.requestSingleInstanceLock()) {
@@ -47,10 +49,46 @@ async function bootstrap(): Promise<void> {
 
   createWindow();
   registerIpc(agent, bot, () => window);
+  watchForPendingWork(agent);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}
+
+/**
+ * Keeps Nexa running when macOS would otherwise suspend it.
+ *
+ * A background app gets throttled, which is fatal for a scheduler: a watcher
+ * due in six hours simply never fires. The blocker is taken only while work is
+ * actually pending and released as soon as things go quiet, so an idle Nexa
+ * has no effect on battery.
+ *
+ * This does NOT keep the machine awake. A closed lid still sleeps, and nothing
+ * runs until it wakes; anything that came due meanwhile fires on the next tick.
+ */
+function watchForPendingWork(agent: NexaAgent): void {
+  const evaluate = (): void => {
+    const state = agent.dashboardState();
+    const busy = state.counts.activeTasks > 0 || state.counts.runningWatchers > 0;
+
+    if (busy && powerBlockerId === null) {
+      powerBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+      log.debug('holding app awake: work pending');
+      return;
+    }
+
+    if (!busy && powerBlockerId !== null) {
+      powerSaveBlocker.stop(powerBlockerId);
+      powerBlockerId = null;
+      log.debug('released app-awake hold: nothing pending');
+    }
+  };
+
+  evaluate();
+  agent.on('state', evaluate);
+  const timer = setInterval(evaluate, 60_000);
+  if (typeof timer.unref === 'function') timer.unref();
 }
 
 /**
@@ -95,6 +133,9 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Chromium throttles timers in hidden windows. The scheduler lives in the
+      // main process, but the dashboard should keep its clock honest too.
+      backgroundThrottling: false,
     },
   });
 
@@ -153,6 +194,10 @@ async function shutdown(): Promise<void> {
   shuttingDown = true;
   log.info('shutting down');
   try {
+    if (powerBlockerId !== null) {
+      powerSaveBlocker.stop(powerBlockerId);
+      powerBlockerId = null;
+    }
     await bot?.stop();
     await agent?.stop();
   } catch (err) {

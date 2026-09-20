@@ -1,6 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import { ipcMain, shell, dialog, type BrowserWindow } from 'electron';
+import { app, ipcMain, shell, dialog, type BrowserWindow } from 'electron';
 import { ZodError } from 'zod';
 import type { NexaAgent } from '../agent/NexaAgent';
 import type { TelegramBot } from '../telegram/TelegramBot';
@@ -284,6 +284,35 @@ export function registerIpc(
   });
 
   ipcMain.handle('notifications:test', async () => agent.notifications.test());
+
+  // --------------------------------------------------------------- autostart
+  /**
+   * Starting at login is what makes a scheduler trustworthy: a watcher due
+   * every six hours is useless if Nexa is only running when you remember to
+   * open it.
+   */
+  ipcMain.handle('system:getAutostart', () => {
+    const settings = app.getLoginItemSettings();
+    return {
+      enabled: settings.openAtLogin,
+      // An unpackaged run would register the Electron binary, not Nexa.
+      supported: app.isPackaged,
+      reason: app.isPackaged ? '' : 'Available once you run the packaged Nexa.app.',
+    };
+  });
+
+  ipcMain.handle('system:setAutostart', (_event, enabled: unknown) => {
+    if (!app.isPackaged) {
+      return { ok: false, error: 'Run the packaged Nexa.app to turn this on.' };
+    }
+    try {
+      app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: false });
+      log.info({ enabled: Boolean(enabled) }, 'login item updated');
+      return { ok: true, enabled: app.getLoginItemSettings().openAtLogin };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
 
   // ------------------------------------------------------------------- push
   const push = (channel: string, payload: unknown): void => {

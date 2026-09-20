@@ -244,6 +244,42 @@ refused with the gap named, rather than quietly degraded into a web search.
 
 ---
 
+## Keeping it running
+
+Nexa only works while it is open, so a watcher due every six hours needs the
+app to actually be there. Two independent mechanisms, use either or both:
+
+**Start at login** (Settings → Agent behaviour → Running in the background).
+Uses the system login item. Requires the packaged app, since an unpackaged run
+would register the Electron binary rather than Nexa.
+
+**Restart if it stops**, which is what a scheduler really needs:
+
+```bash
+npm run autostart          # install a LaunchAgent (macOS)
+npm run autostart:status   # is it installed and running?
+npm run autostart:remove   # undo
+```
+
+The LaunchAgent sets `RunAtLoad` and `KeepAlive`, prefers the packaged app and
+falls back to the dev build, and throttles restarts to every 30s so a startup
+failure cannot spin. Verified by killing the process: launchd brought it back
+with a new pid.
+
+**Staying awake.** While work is pending, Nexa takes a
+`prevent-app-suspension` power blocker so macOS does not throttle it into
+uselessness, and releases it the moment things go quiet, so idling costs
+nothing.
+
+**What this does not do:** keep your Mac awake. A closed lid still sleeps and
+nothing runs. Anything that came due in the meantime fires on the next tick
+after wake, because due work is decided by comparing timestamps rather than by
+a timer that has to have been running. If you need genuine 24/7, that is the
+point to put the headless agent (`npm run agent`, no Electron needed) on a
+machine that stays up.
+
+---
+
 ## Browser profiles
 
 Each profile is a separate persistent browser session with its own cookies,
@@ -329,6 +365,7 @@ npm run build         # compile TypeScript, copy UI assets
 npm start             # launch from an existing build
 npm run agent -- "…"  # run one request headlessly, follow it to completion
 npm run doctor        # what is configured, what is missing
+npm run autostart     # keep Nexa running across logins and crashes (macOS)
 npm run test          # unit tests (no network)
 npm run lint          # ESLint
 npm run typecheck     # tsc --noEmit

@@ -695,6 +695,23 @@ async function boot() {
     render(await window.nexa.getState());
   });
 
+  const autostart = await window.nexa.getAutostart();
+  $('f-autostart').checked = Boolean(autostart.enabled);
+  $('f-autostart').disabled = !autostart.supported;
+  if (!autostart.supported) {
+    $('autostart-hint').textContent = `${autostart.reason} ${$('autostart-hint').textContent}`;
+  }
+
+  $('f-autostart').addEventListener('change', async (event) => {
+    const result = await window.nexa.setAutostart(event.target.checked);
+    if (!result.ok) {
+      event.target.checked = false;
+      setStatus('settings-status', result.error || 'Could not change that.', 'bad');
+      return;
+    }
+    setStatus('settings-status', result.enabled ? 'Nexa will start at login.' : 'Nexa will not start at login.', 'ok');
+  });
+
   $('detect-chat').addEventListener('click', async () => {
     setStatus('telegram-status', 'Asking your bot who has messaged it...');
     const result = await window.nexa.detectChat($('f-bot-token').value.trim());

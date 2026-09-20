@@ -317,6 +317,18 @@
                 <small>Attempts before a task is parked as failed.</small>
               </label>
               <fieldset class="field field-wide">
+                <span>Running in the background</span>
+                <div class="checks">
+                  <label><input id="f-autostart" type="checkbox" /> Start Nexa when I log in</label>
+                </div>
+                <small id="autostart-hint">
+                  Nexa only runs while it is open. It holds itself awake while work is pending and
+                  releases that as soon as things are quiet. A sleeping Mac still runs nothing;
+                  anything that came due catches up on wake.
+                </small>
+              </fieldset>
+
+              <fieldset class="field field-wide">
                 <span>Safety</span>
                 <div class="checks">
                   <label><input id="f-approval" type="checkbox" /> Ask before anything that changes something</label>

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { Planner, type ControlIntent, type Plan } from './Planner';
+import { Planner, reflectOnTask, type ControlIntent, type Plan } from './Planner';
 import { ActivityLog } from './ActivityLog';
 import { TaskEngine } from '../tasks/TaskEngine';
 import { WatcherEngine } from '../watchers/WatcherEngine';
@@ -21,10 +21,13 @@ import { NotifyTool } from '../tools/NotifyTool';
 import { BrowserManager, ProfileInUseError } from '../browser/BrowserManager';
 import { EvidenceStore } from '../evidence/EvidenceStore';
 import { NotificationManager } from '../notifications/NotificationManager';
+import { McpClient } from '../mcp/McpClient';
+import { McpTool } from '../mcp/McpTool';
 import { createLlmProvider } from '../llm/providers';
 import type { LlmProvider } from '../llm/LLMProvider';
 import { loadConfig, saveConfig, type AppConfig } from '../config/config';
-import type { BrowserProfile } from '../config/schema';
+import type { BrowserProfile, McpServerConfig } from '../config/schema';
+import type { Permission } from '../tasks/Task';
 import { childLogger } from '../logging/logger';
 import { hostOf } from './Planner';
 
@@ -61,6 +64,8 @@ export interface DashboardState {
   watchers: ReturnType<WatcherEngine['all']>;
   notifications: ReturnType<NotificationManager['status']>;
   browser: { profiles: BrowserProfile[]; active: string[]; inUseByHuman: boolean };
+  mcp: { id: string; name: string; connected: boolean; tools: number }[];
+  toolCount: number;
   userProfile: AppConfig['userProfile'];
 }
 
@@ -85,6 +90,7 @@ export class NexaAgent extends EventEmitter {
   private planner: Planner;
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
+  private readonly mcpClients = new Map<string, McpClient>();
 
   constructor(config: AppConfig = loadConfig()) {
     super();
@@ -110,6 +116,10 @@ export class NexaAgent extends EventEmitter {
       maxStepRetries: config.agent.maxStepRetries,
       requireApprovalForWrites: config.agent.requireApprovalForWrites,
       isBrowserBusy: () => this.browser.userActiveWithin(USER_ACTIVITY_GRACE_MS),
+      // Adaptive: after the planned steps run, the agent may add a couple more
+      // if the result clearly did not answer the request.
+      reflect: (task) => reflectOnTask(this.llm, task, this.tools),
+      maxAdaptiveSteps: 3,
     });
 
     // Anything the engines emit is forwarded so the UI can react.
@@ -147,6 +157,9 @@ export class NexaAgent extends EventEmitter {
   start(): void {
     if (this.timer) return;
 
+    // MCP servers are optional; a broken one must not stop Nexa starting.
+    void this.connectMcpServers();
+
     const { requeued, waiting } = this.tasks.recoverOnStartup();
     const restored = this.watchers.recoverOnStartup();
     this.activity.add(
@@ -164,6 +177,8 @@ export class NexaAgent extends EventEmitter {
       clearInterval(this.timer);
       this.timer = null;
     }
+    await Promise.all([...this.mcpClients.values()].map((client) => client.disconnect()));
+    this.mcpClients.clear();
     await this.browser.closeAll();
     this.activity.add('Nexa stopped', 'info');
   }
@@ -214,6 +229,57 @@ export class NexaAgent extends EventEmitter {
     } finally {
       this.ticking = false;
     }
+  }
+
+  /**
+   * Connects the configured MCP servers and registers their tools.
+   *
+   * Each server's tools are namespaced and run under that server's configured
+   * permission grant, so borrowing a capability never widens a task's reach.
+   */
+  private async connectMcpServers(): Promise<void> {
+    const servers = this.config.mcpServers.filter((server) => server.enabled);
+    if (servers.length === 0) return;
+
+    for (const server of servers) {
+      try {
+        const client = new McpClient(
+          server.id,
+          server.command,
+          server.args,
+          server.env,
+          server.timeoutSeconds * 1000,
+        );
+        await client.connect();
+        this.mcpClients.set(server.id, client);
+
+        let registered = 0;
+        for (const definition of client.listTools()) {
+          const tool = new McpTool(client, definition, server.permissions as Permission[]);
+          if (this.tools.has(tool.name)) continue;
+          this.tools.register(tool);
+          registered += 1;
+        }
+
+        this.activity.add(`Connected ${server.name || server.id}: ${registered} tool(s)`, 'success');
+      } catch (err) {
+        const message = (err as Error).message;
+        log.warn({ server: server.id, err: message }, 'MCP server unavailable');
+        this.activity.add(`Could not connect ${server.name || server.id}: ${message}`, 'warn');
+      }
+    }
+  }
+
+  mcpStatus(): { id: string; name: string; connected: boolean; tools: number }[] {
+    return this.config.mcpServers.map((server: McpServerConfig) => {
+      const client = this.mcpClients.get(server.id);
+      return {
+        id: server.id,
+        name: server.name || server.id,
+        connected: Boolean(client?.connected),
+        tools: client?.listTools().length ?? 0,
+      };
+    });
   }
 
   // ---------------------------------------------------------------- requests
@@ -502,6 +568,8 @@ export class NexaAgent extends EventEmitter {
         active: this.browser.activeProfiles(),
         inUseByHuman: this.browser.userActiveWithin(USER_ACTIVITY_GRACE_MS),
       },
+      mcp: this.mcpStatus(),
+      toolCount: this.tools.list().length,
       userProfile: this.config.userProfile,
     };
   }

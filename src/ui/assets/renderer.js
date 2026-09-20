@@ -150,6 +150,7 @@ function render(next) {
   renderWatchers();
   renderApprovals();
   renderBrowser();
+  renderMcp();
 }
 
 function setPill(id, value) {
@@ -193,7 +194,9 @@ function renderTaskList(container, tasks, emptyNode, compact = false) {
     }
 
     if (task.result) {
-      record.append(el('div', 'record-sub', task.result.slice(0, 400)));
+      const result = el('div', 'record-result', task.result.slice(0, 1200));
+      if (task.result.length > 400) result.classList.add('clipped');
+      record.append(result);
     }
 
     const actions = el('div', 'record-actions');
@@ -304,6 +307,27 @@ function renderBrowser() {
     const actions = el('div', 'record-actions');
     actions.append(button('Open', 'btn btn-sm btn-quiet', () => call(window.nexa.openBrowser(profile.id))));
     record.append(actions);
+    container.append(record);
+  }
+}
+
+function renderMcp() {
+  const container = $('mcp-list');
+  const servers = state.mcp || [];
+  container.innerHTML = '';
+  $('mcp-empty').classList.toggle('hidden', servers.length > 0);
+
+  for (const server of servers) {
+    const record = el('div', 'record');
+    const head = el('div', 'record-head');
+    head.append(el('span', 'record-title', server.name));
+    head.append(
+      el('span', `status ${server.connected ? 'running' : 'failed'}`, server.connected ? 'connected' : 'not connected'),
+    );
+    record.append(head);
+    record.append(
+      el('div', 'record-sub', server.connected ? `${server.tools} tool(s) available to tasks` : 'check the command in config.json'),
+    );
     container.append(record);
   }
 }

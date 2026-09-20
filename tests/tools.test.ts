@@ -7,7 +7,7 @@ import { ToolRegistry } from '../src/tools/Tool';
 import { FileTool } from '../src/tools/FileTool';
 import { AnalysisTool } from '../src/tools/AnalysisTool';
 import { WatcherTool } from '../src/tools/WatcherTool';
-import { parseSearchResults, htmlToText } from '../src/tools/WebResearchTool';
+import { parseSearchResults, htmlToText, extractiveSummary } from '../src/tools/WebResearchTool';
 import { NullProvider } from '../src/llm/providers';
 import { extractJson } from '../src/llm/LLMProvider';
 import { UserProfileSchema } from '../src/config/schema';
@@ -218,5 +218,43 @@ describe('json extraction from model output', () => {
   it('returns null rather than throwing on rubbish', () => {
     expect(extractJson('no json here')).toBeNull();
     expect(extractJson('{broken')).toBeNull();
+  });
+});
+
+describe('readable extraction', () => {
+  const page = `
+    <html><body>
+      <nav>Home Products Pricing Login Sign up</nav>
+      <header>Your buyers are comparing you right now</header>
+      <main>
+        <h1>The best calendar apps</h1>
+        <p>To identify the best calendar apps, I evaluated 15 tools over three weeks and shortlisted nine of them.</p>
+        <p>Google Calendar remains the strongest free option for most people, with the widest integration support.</p>
+      </main>
+      <aside>Book my briefing</aside>
+      <footer>© 2026 Example. All rights reserved.</footer>
+    </body></html>`;
+
+  it('keeps the article and drops the furniture', () => {
+    const text = htmlToText(page);
+    expect(text).toContain('I evaluated 15 tools');
+    expect(text).not.toMatch(/Login|Sign up|Book my briefing|All rights reserved/);
+  });
+
+  it('summarises with sentences that mention the question', () => {
+    const summary = extractiveSummary(htmlToText(page), ['best', 'calendar', 'apps']);
+    expect(summary).toContain('best calendar apps');
+    expect(summary).toMatch(/evaluated 15 tools/);
+    expect(summary.length).toBeLessThanOrEqual(261);
+  });
+
+  it('falls back to the opening sentences when nothing matches', () => {
+    const summary = extractiveSummary(htmlToText(page), ['quantum', 'submarine']);
+    expect(summary.length).toBeGreaterThan(20);
+  });
+
+  it('never returns a raw slice mid-word', () => {
+    const summary = extractiveSummary(htmlToText(page), ['calendar']);
+    expect(summary).not.toMatch(/\s\w{1,2}$/);
   });
 });

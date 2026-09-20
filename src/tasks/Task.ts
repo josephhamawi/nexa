@@ -115,6 +115,8 @@ export interface Task {
   permissions: Permission[];
   tools: string[];
   steps: TaskStep[];
+  /** How many steps the original plan had, so adaptive additions are visible. */
+  plannedStepCount: number;
   currentStepIndex: number;
   /** 0-100, derived from completed steps. */
   progress: number;
@@ -226,6 +228,7 @@ export function createTask(input: CreateTaskInput): Task {
     permissions: input.permissions ?? [Permission.READ],
     tools: input.tools ?? [],
     steps: input.steps ?? [],
+    plannedStepCount: (input.steps ?? []).length,
     currentStepIndex: 0,
     progress: 0,
     result: null,

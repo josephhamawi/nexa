@@ -206,6 +206,31 @@
           </section>
 
           <section class="panel">
+            <h2>MCP servers</h2>
+            <p class="note" style="margin-top:0">
+              Nexa borrows capabilities from Model Context Protocol servers: filesystem, git,
+              databases, and anything else that speaks MCP. Their tools go through the same
+              permission and approval rules as the built-in ones.
+            </p>
+            <div id="mcp-list" class="list"></div>
+            <p id="mcp-empty" class="empty">
+              None configured. Add them to <code>config.json</code> under <code>mcpServers</code>,
+              then restart Nexa.
+            </p>
+            <pre class="snippet">{
+  "mcpServers": [
+    {
+      "id": "files",
+      "name": "Filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/you/Documents"],
+      "permissions": ["FILES"]
+    }
+  ]
+}</pre>
+          </section>
+
+          <section class="panel">
             <h2>Telegram</h2>
             <ol class="steps">
               <li>Message <strong>@BotFather</strong>, send <code>/newbot</code>, copy the token.</li>

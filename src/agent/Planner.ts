@@ -372,6 +372,71 @@ export class Planner {
   }
 }
 
+/**
+ * Looks at a finished task and decides whether it actually answered the
+ * request. Returns extra steps when it did not, or nothing when it did.
+ *
+ * Only runs with a model configured: judging "is this a good enough answer"
+ * is exactly the kind of call rules are bad at.
+ */
+export async function reflectOnTask(
+  llm: LlmProvider,
+  task: { naturalLanguageRequest: string; steps: { tool: string; description: string; status: string; output?: unknown }[] },
+  tools: ToolRegistry,
+): Promise<TaskStep[]> {
+  if (!llm.available) return [];
+
+  const done = task.steps.filter((step) => step.status === 'DONE');
+  if (done.length === 0) return [];
+
+  const summary = done
+    .map((step) => {
+      const output = step.output as { items?: unknown[]; text?: string; findings?: unknown[] } | undefined;
+      const size =
+        output?.items?.length ?? output?.findings?.length ?? (output?.text ? `${output.text.length} chars` : 'no data');
+      return `- ${step.tool}: ${step.description} -> ${String(size)}`;
+    })
+    .join('\n');
+
+  const result = await llm.complete({
+    json: true,
+    maxOutputTokens: 700,
+    messages: [
+      {
+        role: 'system',
+        content: [
+          'You review a finished task for an operations agent and decide whether it answered the request.',
+          '',
+          'Available tools:',
+          tools.describeForPlanner(),
+          '',
+          'Reply with JSON only: {"satisfied":true} when the work is adequate,',
+          'or {"satisfied":false,"steps":[{"tool":"...","description":"...","input":{}}]} with at most two',
+          'extra steps that would close the gap.',
+          '',
+          'Be strict about padding and lenient about ambition: ask for more only when the result clearly',
+          'misses what was requested, not merely because more could be done.',
+        ].join('\n'),
+      },
+      {
+        role: 'user',
+        content: `Request: ${task.naturalLanguageRequest}\n\nWhat ran:\n${summary}`,
+      },
+    ],
+  });
+
+  const parsed = extractJson<{ satisfied?: boolean; steps?: { tool: string; description?: string; input?: Record<string, unknown> }[] }>(
+    result.text,
+  );
+
+  if (!parsed || parsed.satisfied !== false || !parsed.steps) return [];
+
+  return parsed.steps
+    .filter((step) => tools.has(step.tool))
+    .slice(0, 2)
+    .map((step) => makeStep(step.tool, step.description ?? step.tool, step.input ?? {}));
+}
+
 function isTaskType(value: unknown): value is TaskType {
   return typeof value === 'string' && Object.values(TaskType).includes(value as TaskType);
 }

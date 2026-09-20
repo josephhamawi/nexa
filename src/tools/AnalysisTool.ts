@@ -3,6 +3,7 @@ import { Permission } from '../tasks/Task';
 import type { Tool, ToolContext, ToolResult } from './Tool';
 import { extractJson, type LlmProvider } from '../llm/LLMProvider';
 import type { UserProfile } from '../config/schema';
+import { extractiveSummary } from './WebResearchTool';
 import { childLogger } from '../logging/logger';
 
 const log = childLogger('tool:analysis');
@@ -157,7 +158,9 @@ export class AnalysisTool implements Tool<Input> {
         return {
           title: item.title,
           url: item.url,
-          summary: item.text.slice(0, 300).replace(/\s+/g, ' ').trim(),
+          // Sentences that mention the question, not the first 300 characters
+          // of the page, which is usually a headline and a cookie notice.
+          summary: dropRepeatedTitle(extractiveSummary(item.text, unique), item.title),
           score,
           reason: hits.length ? `matched: ${hits.slice(0, 6).join(', ')}` : 'no strong keyword match',
         };
@@ -207,6 +210,14 @@ function collectMaterial(task: { steps: { id: string; status: string; output?: u
     }
   }
   return material;
+}
+
+/** Pages repeat their own headline in the body; saying it twice reads badly. */
+function dropRepeatedTitle(summary: string, title: string): string {
+  const cleanTitle = title.replace(/\s+/g, ' ').trim();
+  if (cleanTitle.length < 12) return summary;
+  const withoutTitle = summary.split(cleanTitle).join(' ').replace(/\s+/g, ' ').trim();
+  return withoutTitle.length > 40 ? withoutTitle : summary;
 }
 
 function tokenize(text: string): string[] {

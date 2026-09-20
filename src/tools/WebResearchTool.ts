@@ -216,21 +216,126 @@ export async function readPage(url: string, maxChars = 6000): Promise<string | n
 }
 
 export function htmlToText(html: string): string {
-  return html
+  // Prefer the article body when the page marks one: it skips the chrome
+  // (menus, cookie bars, "subscribe" rails) that otherwise dominates a scrape.
+  const main =
+    pickFirst(html, /<article\b[^>]*>([\s\S]*?)<\/article>/i) ??
+    pickFirst(html, /<main\b[^>]*>([\s\S]*?)<\/main>/i) ??
+    html;
+
+  const stripped = main
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<header[\s\S]*?<\/header>/gi, ' ')
+    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
+    .replace(/<aside[\s\S]*?<\/aside>/gi, ' ')
+    .replace(/<form[\s\S]*?<\/form>/gi, ' ')
     .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
+    .replace(/<[^>]+>/g, ' ');
+
+  const lines = decodeEntities(stripped)
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  return dropBoilerplate(lines).join('\n').slice(0, 200_000);
+}
+
+function pickFirst(html: string, pattern: RegExp): string | null {
+  const match = html.match(pattern);
+  return match && (match[1] as string).length > 400 ? (match[1] as string) : null;
+}
+
+function decodeEntities(text: string): string {
+  return text
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
+    .replace(/&#x27;|&#39;|&rsquo;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&nbsp;/g, ' ')
-    .split('\n')
-    .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join('\n')
-    .slice(0, 200_000);
+    .replace(/&mdash;/g, '-')
+    .replace(/&hellip;/g, '...');
+}
+
+const CTA_PATTERNS = [
+  /^(home|menu|search|login|log in|sign in|sign up|subscribe|share|next|previous|back|skip to)/i,
+  /\b(cookie|accept all|privacy policy|terms of service|newsletter|book my briefing|watch now|read more|learn more|get started|try free|request a demo|follow us)\b/i,
+  /^(all rights reserved|copyright|©)/i,
+];
+
+/**
+ * Removes the furniture that surrounds real prose.
+ *
+ * Menus, buttons and promos survive tag stripping as short punctuation-free
+ * fragments, and they crowd out the sentences worth reading. A line is kept
+ * only if it reads like prose or is long enough to be content.
+ */
+function dropBoilerplate(lines: string[]): string[] {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+
+  for (const line of lines) {
+    if (CTA_PATTERNS.some((pattern) => pattern.test(line))) continue;
+
+    const words = line.split(/\s+/).length;
+    const looksLikeProse = /[.!?:]\s*$/.test(line) || words >= 12;
+    if (!looksLikeProse && line.length < 60) continue;
+
+    // Navigation repeats itself; prose rarely does.
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    kept.push(line);
+  }
+
+  // A short or unusually marked-up page can lose everything to the filter.
+  // Losing the content entirely is worse than keeping some furniture, so fall
+  // back to the lightly cleaned lines when filtering took too much.
+  if (kept.join(' ').length < 120 && lines.length > 0) {
+    const lightlyCleaned = lines.filter((line) => !CTA_PATTERNS.some((pattern) => pattern.test(line)));
+    return lightlyCleaned.length > 0 ? lightlyCleaned : lines;
+  }
+
+  return kept;
+}
+
+/**
+ * Picks the sentences that actually answer the question.
+ *
+ * Used when no model is configured: far better than slicing the first 300
+ * characters, which is usually a headline and a cookie notice.
+ */
+export function extractiveSummary(text: string, terms: string[], maxChars = 260): string {
+  const sentences = text
+    .replace(/\n+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length >= 40 && sentence.length <= 400);
+
+  if (sentences.length === 0) return text.replace(/\s+/g, ' ').slice(0, maxChars).trim();
+
+  const needles = terms.map((term) => term.toLowerCase()).filter((term) => term.length > 2);
+  const scored = sentences.map((sentence, index) => {
+    const lower = sentence.toLowerCase();
+    const hits = needles.filter((term) => lower.includes(term)).length;
+    // Earlier sentences win ties: the lead usually carries the point.
+    return { sentence, score: hits * 10 - index * 0.1 };
+  });
+
+  const best = scored.sort((a, b) => b.score - a.score).slice(0, 2);
+  if ((best[0]?.score ?? 0) <= 0) {
+    return sentences.slice(0, 2).join(' ').slice(0, maxChars).trim();
+  }
+
+  // Restore reading order rather than score order.
+  const chosen = best
+    .sort((a, b) => sentences.indexOf(a.sentence) - sentences.indexOf(b.sentence))
+    .map((item) => item.sentence)
+    .join(' ');
+
+  return chosen.length > maxChars ? `${chosen.slice(0, maxChars - 1).trimEnd()}...` : chosen;
 }

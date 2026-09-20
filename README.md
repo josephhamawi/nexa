@@ -67,6 +67,7 @@ src/
   tools/        Tool interface, registry, and the six built-in tools
   llm/          Provider interface, Anthropic, OpenAI-compatible, null
   browser/      BrowserManager (profiles, locking), ChallengeDetector
+  mcp/          MCP client (JSON-RPC over stdio) and tool adapter
   telegram/     TelegramBot: long polling, commands, inline buttons
   notifications/ Telegram, desktop, sound
   evidence/     Screenshots and captured payloads
@@ -122,6 +123,7 @@ Secrets live in `.env` (owner-only, gitignored) and never in `config.json`.
 | `ANTHROPIC_API_KEY` | Anthropic provider |
 | `OPENAI_API_KEY` | OpenAI or any compatible server |
 | `OPENAI_BASE_URL` | Base URL for Ollama, vLLM, LM Studio, … |
+| (per server) | MCP servers may need their own tokens; set them in that server's `env` block in `config.json` |
 | `LOG_LEVEL` | `trace` … `fatal`, default `info` |
 
 All of these can also be set from **Settings** in the app, which writes them to
@@ -167,6 +169,78 @@ Approvals and takeovers arrive as inline buttons: **Approve / Reject**, or
 **Open browser / Resume / Cancel**.
 
 Messages from any chat id other than yours are refused.
+
+---
+
+## MCP servers: borrowing capabilities
+
+Nexa is an MCP client. Any [Model Context Protocol](https://modelcontextprotocol.io)
+server becomes a set of Nexa tools, which is how it reaches things it does not
+implement itself: your filesystem, git, databases, issue trackers, Slack.
+
+Add them to `config.json` and restart:
+
+```json
+{
+  "mcpServers": [
+    {
+      "id": "files",
+      "name": "Filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/you/Documents"],
+      "permissions": ["FILES"]
+    },
+    {
+      "id": "git",
+      "name": "Git",
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "/Users/you/code/project"],
+      "permissions": ["FILES", "EXECUTE"]
+    }
+  ]
+}
+```
+
+Their tools appear to the planner as `mcp_<server>_<tool>` and are usable in any
+task. Settings → MCP servers shows what connected and how many tools each
+contributed.
+
+**The safety model does not loosen for them:**
+
+- Each server runs under the `permissions` you grant it. A filesystem server
+  given `FILES` cannot drive the browser, whatever its tools claim.
+- A tool is assumed to **write** unless the server explicitly marks it
+  read-only, so it goes through the approval gate. Guessing "harmless" would
+  quietly skip the prompt.
+- The command and arguments come from `config.json` only. Nothing the model
+  produces is ever executed as a shell command; it can only call tools a
+  server already advertises.
+- A server that dies or times out fails that step. It cannot hang a task.
+
+Verified against the official filesystem server: 14 tools discovered, schema
+converted, `read_file` correctly detected as read-only, call executed and
+content returned.
+
+---
+
+## How agentic is it?
+
+Nexa plans, acts, and then **checks its own work**:
+
+1. The planner turns your request into steps, choosing from every registered
+   tool, MCP ones included.
+2. The engine runs them, retrying transient failures and stopping for a human
+   when a site or a consequential step needs one.
+3. Before a task is called done, the agent reviews what it actually got against
+   what you asked for. If the result clearly misses, it appends up to three
+   more steps and continues.
+
+That last part is bounded on purpose (`maxAdaptiveSteps`, and only with a model
+configured). An agent that can extend its own plan without limit is one that
+runs up a bill and never finishes.
+
+What it will not do is pretend. A request needing a capability Nexa lacks is
+refused with the gap named, rather than quietly degraded into a web search.
 
 ---
 
@@ -274,12 +348,13 @@ automatically, because its catalogue is generated from the registry.
 npm test
 ```
 
-81 tests across the task state machine, recurrence maths, watcher change
+99 tests across the task state machine, recurrence maths, watcher change
 detection and noise filtering, the planner (control intents, rule planning,
 schedule parsing), the task engine (retries, approvals, takeover, permission
 refusal, crash recovery), the tool registry, the file sandbox, Telegram
-send/receive/button handling and token redaction, and JSON extraction from
-model output.
+send/receive/button handling and token redaction, MCP schema conversion,
+permission inheritance and error handling, page-boilerplate stripping and
+extractive summarisation, and JSON extraction from model output.
 
 Tests run against a scratch data directory and stubbed network. **No test
 contacts the internet.**

@@ -37,6 +37,29 @@ export const BrowserProfileSchema = z.object({
   lastUsed: z.string().nullable().default(null),
 });
 
+/**
+ * An MCP server Nexa may borrow tools from.
+ *
+ * The command and arguments come from this file only: nothing the model
+ * produces is ever executed as a shell command. `permissions` is the grant
+ * every tool from that server runs under, so a filesystem server can be given
+ * FILES without also being given BROWSER.
+ */
+export const McpServerSchema = z.object({
+  id: z.string().min(1).regex(/^[a-z0-9_-]+$/i, 'letters, digits, dash and underscore only'),
+  name: z.string().default(''),
+  enabled: z.boolean().default(true),
+  command: z.string().min(1),
+  args: z.array(z.string()).default([]),
+  /** Extra environment for the server process, e.g. an API token. */
+  env: z.record(z.string()).default({}),
+  permissions: z
+    .array(z.enum(['READ', 'RESEARCH', 'BROWSER', 'FILES', 'EXECUTE', 'NOTIFY']))
+    .default(['READ']),
+  /** Seconds before a call to this server is abandoned. */
+  timeoutSeconds: z.number().int().min(5).max(300).default(45),
+});
+
 export const AgentConfigSchema = z.object({
   /** Tasks executed concurrently. One keeps ordering obvious and sites happy. */
   maxConcurrentTasks: z.number().int().min(1).max(5).default(1),
@@ -89,6 +112,7 @@ export const AppConfigSchema = z.object({
   files: FilesConfigSchema.default({}),
   notifications: NotificationsConfigSchema.default({}),
   userProfile: UserProfileSchema.default({}),
+  mcpServers: z.array(McpServerSchema).default([]),
   browserProfiles: z.array(BrowserProfileSchema).default([
     {
       id: 'default',
@@ -104,6 +128,7 @@ export const AppConfigSchema = z.object({
 export type LlmConfig = z.infer<typeof LlmConfigSchema>;
 export type TelegramConfig = z.infer<typeof TelegramConfigSchema>;
 export type BrowserProfile = z.infer<typeof BrowserProfileSchema>;
+export type McpServerConfig = z.infer<typeof McpServerSchema>;
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 export type UserProfile = z.infer<typeof UserProfileSchema>;
 export type FilesConfig = z.infer<typeof FilesConfigSchema>;

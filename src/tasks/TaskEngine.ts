@@ -26,6 +26,13 @@ export interface TaskEngineOptions {
   requireApprovalForWrites: boolean;
   /** Human activity window: scheduled work waits while you use the browser. */
   isBrowserBusy: () => boolean;
+  /**
+   * Lets the agent decide what to do next after seeing a step's result, rather
+   * than following the plan blindly. Returns extra steps to append, or none.
+   */
+  reflect?: (task: Task) => Promise<TaskStep[]>;
+  /** Ceiling on adaptively-added steps, so a loop cannot run away. */
+  maxAdaptiveSteps?: number;
 }
 
 /**
@@ -223,6 +230,24 @@ export class TaskEngine extends EventEmitter {
         if (outcome.stop) return task;
       }
 
+      // Before finishing, let the agent look at what it got and decide whether
+      // the job is actually done. Bounded, so it cannot loop forever.
+      const extra = await this.reflect(task, controller.signal);
+      if (extra.length > 0) {
+        task = this.save({ ...task, steps: [...task.steps, ...extra] });
+        for (let index = task.currentStepIndex; index < task.steps.length; index += 1) {
+          if (controller.signal.aborted) return this.get(taskId);
+          const current = this.get(taskId);
+          if (!current || current.status !== TaskStatus.RUNNING) return current;
+          task = current;
+          const step = task.steps[index] as TaskStep;
+          if (step.status === 'DONE' || step.status === 'SKIPPED') continue;
+          const outcome = await this.runStep(task, index, controller.signal);
+          task = outcome.task;
+          if (outcome.stop) return task;
+        }
+      }
+
       return this.complete(task);
     } catch (err) {
       const message = (err as Error).message;
@@ -346,6 +371,38 @@ export class TaskEngine extends EventEmitter {
       }),
     };
     return { task: this.fail(failedTask, lastError, step.description), stop: true };
+  }
+
+  /**
+   * Asks the agent whether the plan needs extending.
+   *
+   * This is what makes Nexa adaptive rather than a script runner: a search that
+   * came back thin can trigger another angle before the task is called done.
+   * Strictly bounded, and never allowed to grow a task without limit.
+   */
+  private async reflect(task: Task, signal: AbortSignal): Promise<TaskStep[]> {
+    if (!this.options.reflect || signal.aborted) return [];
+
+    const ceiling = this.options.maxAdaptiveSteps ?? 3;
+    const added = task.steps.length - task.plannedStepCount;
+    if (added >= ceiling) {
+      log.debug({ task: task.id }, 'adaptive step ceiling reached');
+      return [];
+    }
+
+    try {
+      const extra = await this.options.reflect(task);
+      if (extra.length === 0) return [];
+      const room = Math.max(0, ceiling - added);
+      const allowed = extra.slice(0, room);
+      if (allowed.length > 0) {
+        this.activity.add(`Adjusting plan: ${allowed.map((step) => step.description).join('; ')}`, 'info', task.id);
+      }
+      return allowed;
+    } catch (err) {
+      log.debug({ err: (err as Error).message }, 'reflection failed, finishing as planned');
+      return [];
+    }
   }
 
   private buildContext(task: Task, step: TaskStep, signal: AbortSignal): ToolContext {

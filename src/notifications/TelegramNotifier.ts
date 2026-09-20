@@ -201,6 +201,56 @@ function toKeyboard(buttons: InlineButton[][]): { text: string; callback_data: s
   return buttons.map((row) => row.map((button) => ({ text: button.text, callback_data: button.data.slice(0, 64) })));
 }
 
+export interface DetectedChat {
+  chatId: string;
+  from: string;
+  lastMessage: string;
+}
+
+/**
+ * Reads the chat id straight out of the bot's own inbox.
+ *
+ * A private chat's id is just your Telegram user id, but it only exists once
+ * you have messaged the bot. Asking the bot who has written to it is more
+ * reliable than sending people to a third-party id bot, and it proves the
+ * chat is reachable at the same time.
+ */
+export async function detectChats(token: string): Promise<{ ok: boolean; chats?: DetectedChat[]; error?: string }> {
+  if (!/^\d{6,12}:[A-Za-z0-9_-]{30,}$/.test(token)) {
+    return { ok: false, error: 'That does not look like a bot token (123456789:AA...).' };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+    const response = await fetch(`https://api.telegram.org/bot${token}/getUpdates`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // offset 0 so a previously-read backlog is still visible here.
+      body: JSON.stringify({ offset: 0, limit: 20, allowed_updates: ['message'] }),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+
+    const json = (await response.json()) as { ok: boolean; result?: RawUpdate[]; description?: string };
+    if (!json.ok) return { ok: false, error: redactToken(json.description ?? 'Telegram refused the request') };
+
+    const seen = new Map<string, DetectedChat>();
+    for (const update of json.result ?? []) {
+      const chatId = update.message?.chat?.id;
+      if (chatId === undefined) continue;
+      seen.set(String(chatId), {
+        chatId: String(chatId),
+        from: update.message?.from?.username ?? update.message?.from?.first_name ?? 'unknown',
+        lastMessage: (update.message?.text ?? '').slice(0, 60),
+      });
+    }
+
+    return { ok: true, chats: [...seen.values()] };
+  } catch (err) {
+    return { ok: false, error: redactToken((err as Error).message) };
+  }
+}
+
 /**
  * Turns Telegram's terse API errors into the action that actually fixes them.
  *

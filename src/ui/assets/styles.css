@@ -877,6 +877,22 @@ code {
   line-height: 1.7;
 }
 
+/* An input with an action beside it, e.g. Chat ID + Detect. */
+.field-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.field-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-row .btn {
+  white-space: nowrap;
+}
+
 /* Accuracy meter */
 
 .confidence {

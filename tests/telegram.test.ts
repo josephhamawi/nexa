@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TelegramNotifier } from '../src/notifications/TelegramNotifier';
+import { TelegramNotifier, detectChats, explainTelegramError } from '../src/notifications/TelegramNotifier';
 import { NotificationManager } from '../src/notifications/NotificationManager';
 
 const originalFetch = globalThis.fetch;
@@ -134,5 +134,73 @@ describe('notification manager', () => {
   it('reports channel status honestly', () => {
     const manager = new NotificationManager({ telegram: false, desktop: true, sound: false, dailyBriefAt: '' });
     expect(manager.status()).toEqual({ telegram: 'disabled', desktop: 'enabled', sound: 'disabled' });
+  });
+});
+
+describe('detecting the chat id from the bot', () => {
+  it('reads the chat id out of the bot inbox', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        result: [
+          { update_id: 1, message: { text: '/start', chat: { id: 6602116143 }, from: { username: 'rami' } } },
+          { update_id: 2, message: { text: 'hello', chat: { id: 6602116143 }, from: { username: 'rami' } } },
+        ],
+      }),
+    })) as unknown as typeof fetch;
+
+    const result = await detectChats('123456789:AAEabcdefghijklmnopqrstuvwxyz012345678');
+    expect(result.ok).toBe(true);
+    // The same chat twice is one chat, not two.
+    expect(result.chats).toHaveLength(1);
+    expect(result.chats?.[0]).toMatchObject({ chatId: '6602116143', from: 'rami' });
+  });
+
+  it('reports an empty inbox as the actionable thing it is', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true, result: [] }),
+    })) as unknown as typeof fetch;
+
+    const result = await detectChats('123456789:AAEabcdefghijklmnopqrstuvwxyz012345678');
+    expect(result.ok).toBe(true);
+    expect(result.chats).toHaveLength(0);
+  });
+
+  it('rejects a malformed token before calling Telegram', async () => {
+    const mock = vi.fn();
+    globalThis.fetch = mock as unknown as typeof fetch;
+    const result = await detectChats('not-a-token');
+    expect(result.ok).toBe(false);
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it('never leaks the token when Telegram refuses', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: false, description: 'Unauthorized for bot 123456789:AAEabcdefghijklmnopqrstuvwxyz012345678' }),
+    })) as unknown as typeof fetch;
+
+    const result = await detectChats('123456789:AAEabcdefghijklmnopqrstuvwxyz012345678');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('[redacted-token]');
+  });
+});
+
+describe('explaining Telegram errors', () => {
+  it('turns "chat not found" into the actual fix', () => {
+    const explained = explainTelegramError('Bad Request: chat not found');
+    expect(explained).toMatch(/press Start|messaged it first/i);
+    expect(explained).not.toBe('Bad Request: chat not found');
+  });
+
+  it('explains a rejected token and a blocked bot', () => {
+    expect(explainTelegramError('Unauthorized')).toMatch(/BotFather/);
+    expect(explainTelegramError('Forbidden: bot was blocked by the user')).toMatch(/Unblock/i);
+  });
+
+  it('passes an unfamiliar error through unchanged', () => {
+    expect(explainTelegramError('Some new error')).toBe('Some new error');
   });
 });

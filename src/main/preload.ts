@@ -39,6 +39,7 @@ const api = {
   getSecrets: () => ipcRenderer.invoke('secrets:get'),
   saveTelegram: (values: { botToken: string; chatId: string }) =>
     ipcRenderer.invoke('secrets:saveTelegram', values),
+  detectChat: (botToken: string) => ipcRenderer.invoke('secrets:detectChat', { botToken }),
   saveLlm: (values: { provider: string; apiKey: string; baseUrl?: string }) =>
     ipcRenderer.invoke('secrets:saveLlm', values),
   testNotifications: () => ipcRenderer.invoke('notifications:test'),

@@ -234,9 +234,10 @@
           <section class="panel">
             <h2>Telegram</h2>
             <ol class="steps">
-              <li>Message <strong>@BotFather</strong>, send <code>/newbot</code>, copy the token.</li>
-              <li>Message <strong>@userinfobot</strong> for your numeric chat ID.</li>
-              <li>Send your own bot a message once so it may write to you.</li>
+              <li>Message <strong>@BotFather</strong>, send <code>/newbot</code>, copy the token and paste it below.</li>
+              <li>Open the new bot in Telegram (BotFather gives you a <code>t.me/...</code> link) and press
+                <strong>Start</strong>. A bot cannot message you until you have messaged it.</li>
+              <li>Press <strong>Detect</strong> and Nexa reads your chat ID from the bot itself.</li>
             </ol>
             <div class="form-grid">
               <label class="field">
@@ -246,8 +247,13 @@
               </label>
               <label class="field">
                 <span>Chat ID</span>
-                <input id="f-chat-id" type="text" autocomplete="off" inputmode="numeric" placeholder="987654321" />
-                <small>Numbers only. Only this chat may command Nexa.</small>
+                <div class="field-row">
+                  <input id="f-chat-id" type="text" autocomplete="off" inputmode="numeric" placeholder="987654321" />
+                  <button type="button" id="detect-chat" class="btn btn-quiet btn-sm">Detect</button>
+                </div>
+                <small id="chat-id-hint">
+                  Message your bot once in Telegram, then press Detect and Nexa reads the ID from the bot.
+                </small>
               </label>
               <div class="form-actions">
                 <button type="button" id="telegram-save" class="btn btn-solid btn-sm">Save and verify</button>

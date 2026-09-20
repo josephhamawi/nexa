@@ -695,6 +695,23 @@ async function boot() {
     render(await window.nexa.getState());
   });
 
+  $('detect-chat').addEventListener('click', async () => {
+    setStatus('telegram-status', 'Asking your bot who has messaged it...');
+    const result = await window.nexa.detectChat($('f-bot-token').value.trim());
+
+    if (!result.ok) return setStatus('telegram-status', result.error || 'Could not detect.', 'bad');
+
+    const chats = result.chats || [];
+    $('f-chat-id').value = chats[0].chatId;
+    setStatus(
+      'telegram-status',
+      chats.length === 1
+        ? `Found chat ${chats[0].chatId} (${chats[0].from}). Press Save and verify.`
+        : `Found ${chats.length} chats; using ${chats[0].chatId} (${chats[0].from}).`,
+      'ok',
+    );
+  });
+
   $('telegram-test').addEventListener('click', async () => {
     setStatus('telegram-status', 'Sending...');
     const outcome = await window.nexa.testNotifications();

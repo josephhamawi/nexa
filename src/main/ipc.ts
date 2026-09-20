@@ -12,7 +12,7 @@ import {
   writeEnvValues,
 } from '../config/config';
 import { AppConfigSchema } from '../config/schema';
-import { explainTelegramError } from '../notifications/TelegramNotifier';
+import { detectChats, explainTelegramError } from '../notifications/TelegramNotifier';
 import { childLogger } from '../logging/logger';
 
 const log = childLogger('ipc');
@@ -178,6 +178,32 @@ export function registerIpc(
       openai: { keyPresent: Boolean(env.OPENAI_API_KEY), baseUrl: env.OPENAI_BASE_URL ?? '' },
       envPath: paths.env,
     };
+  });
+
+  /**
+   * Finds the chat id by asking the bot who has messaged it. Uses the token in
+   * the form if one was typed, otherwise the saved one.
+   */
+  ipcMain.handle('secrets:detectChat', async (_event, payload: unknown) => {
+    const typed = (payload ?? {}) as { botToken?: unknown };
+    const token =
+      (typeof typed.botToken === 'string' && typed.botToken.trim()) || loadEnv().TELEGRAM_BOT_TOKEN || '';
+
+    if (!token) return { ok: false, error: 'Paste the bot token first, or save it.' };
+
+    const result = await detectChats(token);
+    if (!result.ok) return { ok: false, error: explainTelegramError(String(result.error)) };
+
+    if (!result.chats || result.chats.length === 0) {
+      return {
+        ok: false,
+        error:
+          'That bot has no messages yet. Open Telegram, find the bot by its @username, press Start ' +
+          'or send it any message, then press Detect again.',
+      };
+    }
+
+    return { ok: true, chats: result.chats };
   });
 
   ipcMain.handle('secrets:saveTelegram', async (_event, payload: unknown) => {

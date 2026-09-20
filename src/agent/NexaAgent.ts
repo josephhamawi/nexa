@@ -1,7 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { Planner, reflectOnTask, type ControlIntent, type Plan } from './Planner';
 import { Clarifier, type ClarifyingQuestion } from './Clarifier';
-import { computeConfidence, type Confidence } from './Confidence';
 import { ActivityLog } from './ActivityLog';
 import { TaskEngine } from '../tasks/TaskEngine';
 import { WatcherEngine } from '../watchers/WatcherEngine';

@@ -7,6 +7,7 @@ const $ = (id) => document.getElementById(id);
 
 let state = null;
 let config = null;
+let windowMode = 'normal';
 
 /* ── Theme: light by default, dark and system on request ─────────────────── */
 
@@ -151,6 +152,7 @@ function render(next) {
   renderApprovals();
   renderBrowser();
   renderMcp();
+  renderHud();
 }
 
 function setPill(id, value) {
@@ -340,6 +342,58 @@ function confidenceMeter(confidence) {
   }
 
   return wrap;
+}
+
+/**
+ * The compact view. Same state, ruthlessly filtered: what Nexa is doing, what
+ * it needs from you, and a box to ask for more.
+ */
+function renderHud() {
+  const waiting = state.tasks.find(
+    (task) => task.status === 'WAITING_FOR_HUMAN' || task.status === 'WAITING_FOR_APPROVAL',
+  );
+  const running = state.tasks.find((task) => task.status === 'RUNNING') || state.tasks[0];
+
+  $('hud-dot').className = $('agent-dot').className;
+  $('hud-label').textContent = $('agent-state-label').textContent;
+
+  $('hud-active').textContent = state.counts.activeTasks;
+  $('hud-watchers').textContent = state.counts.runningWatchers;
+  $('hud-done').textContent = state.counts.completedToday;
+
+  // Something needs a person: that outranks progress reporting.
+  const attention = $('hud-attention');
+  attention.classList.toggle('hidden', !waiting);
+  if (waiting) {
+    const approval = waiting.status === 'WAITING_FOR_APPROVAL';
+    $('hud-attention-text').textContent = approval
+      ? `Approve "${waiting.name}"? ${waiting.approval?.reason || ''}`.trim()
+      : `"${waiting.name}" needs you in the browser.`;
+
+    $('hud-approve').classList.toggle('hidden', !approval);
+    $('hud-resume').classList.toggle('hidden', approval);
+    $('hud-open').classList.toggle('hidden', approval);
+
+    $('hud-approve').onclick = () => call(window.nexa.approveTask(waiting.id, true));
+    $('hud-resume').onclick = () => call(window.nexa.resumeTask(waiting.id));
+    $('hud-open').onclick = () => call(window.nexa.openBrowser());
+  }
+
+  const task = $('hud-task');
+  task.classList.toggle('hidden', !running);
+  $('hud-idle').classList.toggle('hidden', Boolean(running || waiting));
+
+  if (running) {
+    $('hud-task-name').textContent = running.name;
+    $('hud-progress').style.width = `${running.progress}%`;
+    const current = running.steps.find((step) => step.status === 'RUNNING') ||
+      running.steps.find((step) => step.status === 'PENDING');
+    $('hud-step').textContent = current
+      ? current.description
+      : running.result
+        ? running.result.split('\n')[0].slice(0, 80)
+        : prettyStatus(running.status);
+  }
 }
 
 function renderMcp() {
@@ -559,6 +613,28 @@ function switchView(name) {
   $('view-subtitle').textContent = VIEW_SUBTITLES[name] || '';
 }
 
+const MODE_KEY = 'nexa-window-mode';
+
+async function applyWindowMode(mode, persist = true) {
+  windowMode = mode;
+  document.body.dataset.mode = mode;
+
+  for (const button of document.querySelectorAll('.mode-switch button')) {
+    button.classList.toggle('active', button.dataset.mode === mode);
+  }
+
+  if (persist) {
+    try {
+      localStorage.setItem(MODE_KEY, mode);
+    } catch {
+      /* private mode: the choice resets next launch */
+    }
+  }
+
+  await window.nexa.setWindowMode(mode);
+  if (state) renderHud();
+}
+
 async function submitCommand() {
   const input = $('command-input');
   const text = input.value.trim();
@@ -608,6 +684,33 @@ async function boot() {
   tick();
   setInterval(tick, 1000);
 
+  for (const button of document.querySelectorAll('.mode-switch button')) {
+    button.addEventListener('click', () => applyWindowMode(button.dataset.mode));
+  }
+
+  $('hud-expand').addEventListener('click', () => applyWindowMode('normal'));
+
+  $('hud-input').addEventListener('keydown', async (event) => {
+    if (event.key !== 'Enter') return;
+    const text = $('hud-input').value.trim();
+    if (!text) return;
+
+    $('hud-input').value = '';
+    $('hud-input').placeholder = 'Planning...';
+    const result = await window.nexa.request(text);
+    // The HUD has no room for a reply, so it goes in the placeholder and the
+    // full answer stays waiting in the normal view.
+    $('hud-input').placeholder = result.ok ? result.text.split('\n')[0].slice(0, 48) : 'That did not work';
+    setTimeout(() => {
+      $('hud-input').placeholder = 'Ask Nexa...';
+    }, 6000);
+    if (result.ok) {
+      reply(result.text);
+      renderSuggestedAnswers(result.clarifying);
+      if (result.state) render(result.state);
+    }
+  });
+
   $('command-send').addEventListener('click', submitCommand);
   $('command-input').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') submitCommand();
@@ -622,6 +725,16 @@ async function boot() {
 
   render(initialState);
   renderActivity(activity);
+
+  // Restore the size the user last chose, rather than always opening large.
+  let savedMode = 'normal';
+  try {
+    savedMode = localStorage.getItem(MODE_KEY) || 'normal';
+  } catch {
+    savedMode = 'normal';
+  }
+  if (savedMode !== 'normal') await applyWindowMode(savedMode, false);
+  else document.body.dataset.mode = 'normal';
   fillSettings(initialConfig);
   applySecrets(secrets);
 

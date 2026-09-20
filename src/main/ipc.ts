@@ -285,6 +285,46 @@ export function registerIpc(
 
   ipcMain.handle('notifications:test', async () => agent.notifications.test());
 
+  // ------------------------------------------------------------ window modes
+  /**
+   * Three shapes for three situations: a glanceable HUD you keep in a corner,
+   * the full console, and maximised for reading a long report.
+   *
+   * Minimum sizes are set before resizing, otherwise the new bounds are clamped
+   * by the previous mode's minimum and the window refuses to shrink.
+   */
+  ipcMain.handle('window:setMode', (_event, mode: unknown) => {
+    const window = getWindow();
+    if (!window || window.isDestroyed()) return { ok: false, error: 'no window' };
+
+    switch (mode) {
+      case 'compact': {
+        if (window.isMaximized()) window.unmaximize();
+        window.setMinimumSize(320, 200);
+        window.setSize(400, 300, true);
+        // A HUD that disappears behind other windows is not a HUD.
+        window.setAlwaysOnTop(true, 'floating');
+        break;
+      }
+      case 'maximized': {
+        window.setAlwaysOnTop(false);
+        window.setMinimumSize(980, 700);
+        window.maximize();
+        break;
+      }
+      default: {
+        if (window.isMaximized()) window.unmaximize();
+        window.setAlwaysOnTop(false);
+        window.setMinimumSize(980, 700);
+        window.setSize(1240, 900, true);
+        window.center();
+        break;
+      }
+    }
+
+    return { ok: true, mode: mode === 'compact' || mode === 'maximized' ? mode : 'normal' };
+  });
+
   // --------------------------------------------------------------- autostart
   /**
    * Starting at login is what makes a scheduler trustworthy: a watcher due

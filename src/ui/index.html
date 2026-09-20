@@ -11,6 +11,41 @@
     <link rel="stylesheet" href="assets/styles.css" />
   </head>
   <body>
+    <!-- Compact HUD: everything that matters at a glance, nothing else. -->
+    <div class="hud" id="hud">
+      <div class="hud-top">
+        <span class="hud-state"><span id="hud-dot" class="dot"></span><span id="hud-label">idle</span></span>
+        <button id="hud-expand" class="hud-expand" title="Back to full size" aria-label="Expand">&#x2921;</button>
+      </div>
+
+      <div id="hud-attention" class="hud-attention hidden">
+        <p id="hud-attention-text">Needs you</p>
+        <div class="hud-actions">
+          <button id="hud-approve" class="btn btn-sm btn-solid hidden">Approve</button>
+          <button id="hud-resume" class="btn btn-sm hidden">Resume</button>
+          <button id="hud-open" class="btn btn-sm btn-quiet hidden">Browser</button>
+        </div>
+      </div>
+
+      <div id="hud-task" class="hud-task hidden">
+        <p id="hud-task-name" class="hud-task-name">&nbsp;</p>
+        <div class="progress"><span id="hud-progress"></span></div>
+        <p id="hud-step" class="hud-step">&nbsp;</p>
+      </div>
+
+      <p id="hud-idle" class="hud-idle">Nothing running.</p>
+
+      <div class="hud-counts">
+        <span><strong id="hud-active">0</strong> tasks</span>
+        <span><strong id="hud-watchers">0</strong> watchers</span>
+        <span><strong id="hud-done">0</strong> done</span>
+      </div>
+
+      <div class="hud-command">
+        <input id="hud-input" type="text" autocomplete="off" placeholder="Ask Nexa..." />
+      </div>
+    </div>
+
     <div class="shell">
       <!-- Rail -->
       <nav class="rail">
@@ -60,6 +95,17 @@
             <span class="meta" id="llm-badge">model: checking</span>
             <span class="meta" id="telegram-badge">telegram: checking</span>
             <span class="meta mono" id="clock">--:--:--</span>
+            <div class="mode-switch" role="group" aria-label="Window size">
+              <button data-mode="compact" title="Compact HUD" aria-label="Compact">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="9" width="10" height="6" rx="1.4"/></svg>
+              </button>
+              <button data-mode="normal" class="active" title="Normal" aria-label="Normal">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="6" width="15" height="12" rx="1.6"/></svg>
+              </button>
+              <button data-mode="maximized" title="Maximized" aria-label="Maximized">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="16" rx="1.6"/></svg>
+              </button>
+            </div>
           </div>
         </header>
 

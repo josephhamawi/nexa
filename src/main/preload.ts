@@ -43,6 +43,8 @@ const api = {
   saveLlm: (values: { provider: string; apiKey: string; baseUrl?: string }) =>
     ipcRenderer.invoke('secrets:saveLlm', values),
   testNotifications: () => ipcRenderer.invoke('notifications:test'),
+  setWindowMode: (mode: 'compact' | 'normal' | 'maximized') =>
+    ipcRenderer.invoke('window:setMode', mode),
   getAutostart: () => ipcRenderer.invoke('system:getAutostart'),
   setAutostart: (enabled: boolean) => ipcRenderer.invoke('system:setAutostart', enabled),
 

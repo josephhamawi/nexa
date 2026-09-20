@@ -1033,3 +1033,183 @@ code {
     align-items: center;
   }
 }
+
+/* ── Window modes ────────────────────────────────────────────────────────────
+   Compact is a HUD you keep in a corner: agent state, the one task that is
+   running, anything waiting on you, and a box to ask for more. Everything else
+   is noise at 400px wide. */
+
+.mode-switch {
+  display: flex;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 2px;
+  background: var(--surface-2);
+}
+
+.mode-switch button {
+  width: 26px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--ink-3);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.mode-switch button:hover {
+  color: var(--ink);
+}
+
+.mode-switch button.active {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.mode-switch svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+
+/* The HUD is hidden until compact mode asks for it. */
+.hud {
+  display: none;
+}
+
+body[data-mode='compact'] .shell {
+  display: none;
+}
+
+body[data-mode='compact'] .hud {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  height: 100vh;
+  padding: 12px 14px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.hud-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.hud-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--ink-2);
+  text-transform: capitalize;
+}
+
+.hud-expand {
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink-3);
+  border-radius: 4px;
+  width: 22px;
+  height: 20px;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hud-expand:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.hud-task {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.hud-task-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-step {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-idle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* Anything needing a person is the one thing worth shouting about. */
+.hud-attention {
+  padding: 8px 10px;
+  border-radius: 5px;
+  background: var(--warn-soft);
+  border-left: 3px solid var(--warn);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.hud-attention p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.hud-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hud-counts {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: auto;
+}
+
+.hud-counts strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.hud-command input {
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.hud-command input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}

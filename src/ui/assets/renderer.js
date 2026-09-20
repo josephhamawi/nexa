@@ -193,6 +193,8 @@ function renderTaskList(container, tasks, emptyNode, compact = false) {
       record.append(steps);
     }
 
+    if (task.confidence) record.append(confidenceMeter(task.confidence));
+
     if (task.result) {
       const result = el('div', 'record-result', task.result.slice(0, 1200));
       if (task.result.length > 400) result.classList.add('clipped');
@@ -311,6 +313,35 @@ function renderBrowser() {
   }
 }
 
+/**
+ * The accuracy meter: a bar, a number, and the reasons behind it.
+ * Showing the reasons is the point; a bare percentage invites false trust.
+ */
+function confidenceMeter(confidence) {
+  const wrap = el('div', `confidence ${confidence.level}`);
+
+  const head = el('div', 'confidence-head');
+  head.append(el('span', 'confidence-label', 'Confidence'));
+  head.append(el('span', 'confidence-score', confidence.level === 'none' ? 'simulated' : `${confidence.score}%`));
+  wrap.append(head);
+
+  const bar = el('div', 'confidence-bar');
+  const fill = el('span');
+  fill.style.width = `${confidence.score}%`;
+  bar.append(fill);
+  wrap.append(bar);
+
+  if (confidence.factors && confidence.factors.length > 0) {
+    const factors = el('div', 'confidence-factors');
+    for (const factor of confidence.factors) {
+      factors.append(el('span', factor.delta >= 0 ? 'up' : 'down', `${factor.delta >= 0 ? '+' : ''}${factor.delta} ${factor.label}`));
+    }
+    wrap.append(factors);
+  }
+
+  return wrap;
+}
+
 function renderMcp() {
   const container = $('mcp-list');
   const servers = state.mcp || [];
@@ -388,6 +419,32 @@ async function call(promise) {
 
 function reply(text) {
   $('command-reply').textContent = text;
+  $('answer-chips').innerHTML = '';
+}
+
+/** Turns a clarifying question's suggestions into one-click answers. */
+function renderSuggestedAnswers(clarifying) {
+  const container = $('answer-chips');
+  container.innerHTML = '';
+  if (!clarifying) return;
+
+  const suggestions = clarifying.questions.flatMap((question) => question.suggestions || []);
+  for (const suggestion of suggestions.slice(0, 6)) {
+    container.append(
+      button(suggestion, 'chip', () => {
+        $('command-input').value = suggestion;
+        submitCommand();
+      }),
+    );
+  }
+  if (suggestions.length > 0) {
+    container.append(
+      button('just do it', 'chip', () => {
+        $('command-input').value = 'just do it';
+        submitCommand();
+      }),
+    );
+  }
 }
 
 /* ── Settings ────────────────────────────────────────────────────────────── */
@@ -519,7 +576,11 @@ async function submitCommand() {
     } else {
       reply(result.text);
       input.value = '';
+      // Nexa asked something back: offer the suggested answers as chips and
+      // keep focus in the box so replying is one keystroke away.
+      renderSuggestedAnswers(result.clarifying);
       if (result.state) render(result.state);
+      input.focus();
     }
   } finally {
     send.disabled = false;

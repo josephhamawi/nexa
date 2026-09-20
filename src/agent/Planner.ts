@@ -532,10 +532,18 @@ function extractKeywords(text: string): string[] {
 }
 
 function buildJobQuery(text: string, profile: UserProfile): string {
-  const roles = profile.preferredRoles.length > 0 ? profile.preferredRoles.slice(0, 3).join(' OR ') : '';
-  const remote = profile.remotePreference === 'remote' ? 'remote' : '';
-  const explicit = stripCommandWords(text);
-  return [explicit, roles, remote, 'jobs'].filter(Boolean).join(' ').slice(0, 220);
+  // Detail supplied in answer to a clarifying question is the most specific
+  // thing the user said, so it leads the query.
+  const clarified = text.match(/\(([^)]{3,120})\)\s*$/)?.[1]?.trim();
+  const explicit = stripCommandWords(clarified ? text.replace(/\s*\([^)]*\)\s*$/, '') : text);
+  const roles = clarified ? '' : profile.preferredRoles.slice(0, 3).join(' OR ');
+  const remote = profile.remotePreference === 'remote' && !/remote/i.test(clarified ?? '') ? 'remote' : '';
+
+  return [clarified, explicit, roles, remote, 'jobs']
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .slice(0, 220);
 }
 
 /**

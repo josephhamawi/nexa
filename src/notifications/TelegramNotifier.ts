@@ -201,6 +201,37 @@ function toKeyboard(buttons: InlineButton[][]): { text: string; callback_data: s
   return buttons.map((row) => row.map((button) => ({ text: button.text, callback_data: button.data.slice(0, 64) })));
 }
 
+/**
+ * Turns Telegram's terse API errors into the action that actually fixes them.
+ *
+ * "Bad Request: chat not found" is the common one and reads like a bug in the
+ * app, when it only means the bot has never been spoken to from that chat.
+ */
+export function explainTelegramError(error: string): string {
+  const lower = error.toLowerCase();
+
+  if (lower.includes('chat not found')) {
+    return (
+      'Telegram says it cannot find that chat. Open Telegram, search for your bot by its @username, ' +
+      'press Start (or send it any message), then save again. A bot cannot message you until you ' +
+      'have messaged it first. Also check the chat ID belongs to the same account you messaged from.'
+    );
+  }
+  if (lower.includes('unauthorized')) {
+    return 'That bot token was rejected. Copy it again from @BotFather, it is the long 123456789:AA... string.';
+  }
+  if (lower.includes('blocked by the user')) {
+    return 'You have blocked this bot in Telegram. Unblock it, then save again.';
+  }
+  if (lower.includes('deactivated')) {
+    return 'That bot has been deleted in @BotFather. Create a new one and paste its token.';
+  }
+  if (lower.includes('too many requests') || lower.includes('retry after')) {
+    return 'Telegram is rate limiting this bot. Wait a minute and try again.';
+  }
+  return error;
+}
+
 /** Belt and braces: strip anything token-shaped out of outbound strings. */
 function redactToken(text: string): string {
   return text.replace(/\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/g, '[redacted-token]');

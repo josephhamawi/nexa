@@ -3,6 +3,7 @@ import { Permission } from '../tasks/Task';
 import type { Tool, ToolContext, ToolResult } from './Tool';
 import type { NotificationManager } from '../notifications/NotificationManager';
 import { extractJson, type LlmProvider } from '../llm/LLMProvider';
+import { computeConfidence } from '../agent/Confidence';
 
 const InputSchema = z.object({
   /** What the report should cover. The material comes from earlier steps. */
@@ -45,7 +46,12 @@ export class NotifyTool implements Tool<Input> {
 
   async execute(input: Input, context: ToolContext): Promise<ToolResult> {
     const items = collectItems(context.task);
-    const body = await this.composeReport(input, items, context);
+    const report = await this.composeReport(input, items, context);
+
+    // Every report states how much it should be trusted, and why. A number
+    // without reasons would just be decoration.
+    const confidence = computeConfidence(context.task);
+    const body = `${report}\n\n---\n${confidence.summary}`;
 
     context.report('Sending report');
     const outcome = await this.notifications.report({

@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { Planner, reflectOnTask, type ControlIntent, type Plan } from './Planner';
+import { Clarifier, type ClarifyingQuestion } from './Clarifier';
+import { computeConfidence, type Confidence } from './Confidence';
 import { ActivityLog } from './ActivityLog';
 import { TaskEngine } from '../tasks/TaskEngine';
 import { WatcherEngine } from '../watchers/WatcherEngine';
@@ -43,7 +45,24 @@ export interface AgentResponse {
   task?: Task;
   /** True when a task was created and is now queued. */
   created?: boolean;
+  /** Set when Nexa needs answers before it will start. */
+  clarifying?: { questions: ClarifyingQuestion[]; interpretation: string };
 }
+
+/** An open question-and-answer exchange, keyed by who is asking. */
+interface ClarificationSession {
+  originalRequest: string;
+  questions: ClarifyingQuestion[];
+  answers: string[];
+  askedAt: number;
+  rounds: number;
+  source: Task['source'];
+  chatId: string | null;
+}
+
+/** Sessions go stale rather than lingering and confusing a later request. */
+const CLARIFY_TTL_MS = 30 * 60_000;
+const MAX_CLARIFY_ROUNDS = 2;
 
 export interface DashboardState {
   agent: {
@@ -88,6 +107,9 @@ export class NexaAgent extends EventEmitter {
   private config: AppConfig;
   private llm: LlmProvider;
   private planner: Planner;
+  private clarifier: Clarifier;
+  /** One open clarification per asker: "desktop" or a Telegram chat id. */
+  private readonly clarifications = new Map<string, ClarificationSession>();
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
   private readonly mcpClients = new Map<string, McpClient>();
@@ -102,6 +124,7 @@ export class NexaAgent extends EventEmitter {
     this.notifications = new NotificationManager(config.notifications);
     this.llm = createLlmProvider(config);
     this.planner = new Planner(this.llm);
+    this.clarifier = new Clarifier(this.llm);
 
     this.watchers = new WatcherEngine(this.browser, this.notifications, this.activity, {
       minIntervalSeconds: config.agent.minWatchIntervalSeconds,
@@ -298,6 +321,30 @@ export class NexaAgent extends EventEmitter {
 
     this.activity.add(`Request: ${text.slice(0, 120)}`, 'info');
 
+    const askerKey = chatId ?? source;
+
+    // An answer to an open question is not a new request.
+    const pending = this.takeClarification(askerKey);
+    if (pending) return this.continueClarification(pending, text, source, chatId);
+
+    // Control phrases are never vague enough to need clarifying.
+    const control = this.planner.detectControl(text);
+    if (!control) {
+      const clarity = await this.clarifier.assess(text, this.config.userProfile);
+      if (!clarity.clear && clarity.questions.length > 0) {
+        return this.openClarification(askerKey, text, clarity.questions, clarity.interpretation, source, chatId);
+      }
+    }
+
+    return this.createTaskFrom(text, source, chatId);
+  }
+
+  /** Plans a request that is specific enough, and queues it. */
+  private async createTaskFrom(
+    text: string,
+    source: Task['source'],
+    chatId: string | null,
+  ): Promise<AgentResponse> {
     const plan = await this.planner.plan(text, {
       profile: this.config.userProfile,
       tools: this.tools,
@@ -337,6 +384,88 @@ export class NexaAgent extends EventEmitter {
       task: this.tasks.get(task.id),
       created: true,
     };
+  }
+
+  // ------------------------------------------------------------ clarifying
+
+  /** Parks the request and asks, rather than guessing and doing the wrong job. */
+  private openClarification(
+    key: string,
+    request: string,
+    questions: ClarifyingQuestion[],
+    interpretation: string,
+    source: Task['source'],
+    chatId: string | null,
+  ): AgentResponse {
+    const existing = this.clarifications.get(key);
+    const rounds = (existing?.rounds ?? 0) + 1;
+
+    this.clarifications.set(key, {
+      originalRequest: request,
+      questions,
+      answers: [],
+      askedAt: Date.now(),
+      rounds,
+      source,
+      chatId,
+    });
+
+    this.activity.add(`Asking before starting: ${questions.length} question(s)`, 'info');
+
+    const lines = [
+      `Before I start, ${questions.length === 1 ? 'one thing' : `${questions.length} things`}:`,
+      '',
+      ...questions.flatMap((question, index) => {
+        const parts = [`${index + 1}. ${question.question}`];
+        if (question.why) parts.push(`   (${question.why})`);
+        if (question.suggestions.length > 0) parts.push(`   e.g. ${question.suggestions.join(' / ')}`);
+        return parts;
+      }),
+      '',
+      questions.length === 1
+        ? 'Reply with the answer, or say "just do it" and I will use my best guess.'
+        : 'Reply with the answers on one line, or say "just do it" and I will use my best guess.',
+    ];
+
+    return { text: lines.join('\n'), created: false, clarifying: { questions, interpretation } };
+  }
+
+  /** Folds the answers in and either starts, or asks once more. */
+  private async continueClarification(
+    session: ClarificationSession,
+    answer: string,
+    source: Task['source'],
+    chatId: string | null,
+  ): Promise<AgentResponse> {
+    // Splitting on separators lets one line answer several questions.
+    const answers =
+      session.questions.length > 1
+        ? answer.split(/\s*[;|]\s*|\s+-\s+/).map((part) => part.trim())
+        : [answer.trim()];
+
+    const merged = this.clarifier.merge(session.originalRequest, session.questions, answers);
+    this.activity.add('Got the detail, planning now', 'info');
+
+    // One more check, but never an endless interrogation.
+    if (session.rounds < MAX_CLARIFY_ROUNDS) {
+      const clarity = await this.clarifier.assess(merged, this.config.userProfile);
+      if (!clarity.clear && clarity.questions.length > 0) {
+        const key = chatId ?? source;
+        this.clarifications.set(key, { ...session, originalRequest: merged, rounds: session.rounds });
+        return this.openClarification(key, merged, clarity.questions, clarity.interpretation, source, chatId);
+      }
+    }
+
+    return this.createTaskFrom(merged, source, chatId);
+  }
+
+  private takeClarification(key: string): ClarificationSession | null {
+    const session = this.clarifications.get(key);
+    if (!session) return null;
+    this.clarifications.delete(key);
+    // A stale session would attach an old question to an unrelated request.
+    if (Date.now() - session.askedAt > CLARIFY_TTL_MS) return null;
+    return session;
   }
 
   private describePlan(plan: Plan, task: Task): string {
@@ -514,6 +643,7 @@ export class NexaAgent extends EventEmitter {
     this.notifications.updateConfig(this.config.notifications);
     this.llm = createLlmProvider(this.config);
     this.planner = new Planner(this.llm);
+    this.clarifier = new Clarifier(this.llm);
     this.tasks.updateOptions({
       maxStepRetries: this.config.agent.maxStepRetries,
       requireApprovalForWrites: this.config.agent.requireApprovalForWrites,

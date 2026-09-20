@@ -122,6 +122,8 @@ export interface Task {
   progress: number;
   result: string | null;
   resultData?: unknown;
+  /** How much the finished result deserves to be trusted, with reasons. */
+  confidence?: { score: number; level: string; summary: string; factors: { label: string; delta: number }[] } | null;
   evidence: Evidence[];
   errors: { at: string; message: string; step?: string }[];
   approvalRequired: boolean;
@@ -232,6 +234,7 @@ export function createTask(input: CreateTaskInput): Task {
     currentStepIndex: 0,
     progress: 0,
     result: null,
+    confidence: null,
     evidence: [],
     errors: [],
     approvalRequired: input.approvalRequired ?? false,

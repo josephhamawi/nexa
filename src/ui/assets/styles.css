@@ -877,6 +877,79 @@ code {
   line-height: 1.7;
 }
 
+/* Accuracy meter */
+
+.confidence {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+
+.confidence-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.confidence-label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.confidence-score {
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.confidence.high .confidence-score { color: var(--ok); }
+.confidence.medium .confidence-score { color: var(--warn); }
+.confidence.low .confidence-score,
+.confidence.none .confidence-score { color: var(--err); }
+
+.confidence-bar {
+  height: 4px;
+  background: var(--rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.confidence-bar span {
+  display: block;
+  height: 100%;
+  background: var(--ink-3);
+  transition: width 320ms ease;
+}
+
+.confidence.high .confidence-bar span { background: var(--ok); }
+.confidence.medium .confidence-bar span { background: var(--warn); }
+.confidence.low .confidence-bar span,
+.confidence.none .confidence-bar span { background: var(--err); }
+
+.confidence-factors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+.confidence-factors .up { color: var(--ok); }
+.confidence-factors .down { color: var(--err); }
+
+.answer-chips {
+  margin: -8px 0 16px;
+}
+
+.answer-chips:empty {
+  margin: 0;
+}
+
 /* Config snippets: readable, scrollable, never pushing the layout wide. */
 .snippet {
   margin: 12px 0 0;

@@ -2,7 +2,8 @@
 // packaged builds before any other module resolves a path.
 import './appPaths';
 import path from 'node:path';
-import { app, BrowserWindow, shell } from 'electron';
+import fs from 'node:fs';
+import { app, BrowserWindow, nativeImage, shell } from 'electron';
 import { ensureDataDirs, loadConfig, loadEnv } from '../config/config';
 import { childLogger, logger } from '../logging/logger';
 import { NexaAgent } from '../agent/NexaAgent';
@@ -35,6 +36,8 @@ async function bootstrap(): Promise<void> {
 
   await app.whenReady();
 
+  applyAppIcon();
+
   const config = loadConfig();
   agent = new NexaAgent(config);
   agent.start();
@@ -50,6 +53,32 @@ async function bootstrap(): Promise<void> {
   });
 }
 
+/**
+ * Sets the dock and window icon when running unpackaged.
+ *
+ * A packaged build takes its icon from the bundle, but `electron dist/main.js`
+ * shows Electron's own atom logo unless the icon is applied at runtime.
+ */
+function applyAppIcon(): void {
+  const iconPath = path.join(__dirname, '..', 'icon.png');
+  if (!fs.existsSync(iconPath)) return;
+
+  try {
+    const image = nativeImage.createFromPath(iconPath);
+    if (image.isEmpty()) {
+      log.warn({ iconPath }, 'app icon could not be read');
+      return;
+    }
+    appIcon = image;
+    if (process.platform === 'darwin' && app.dock) app.dock.setIcon(image);
+    log.debug('app icon applied');
+  } catch (err) {
+    log.warn({ err: (err as Error).message }, 'could not set the app icon');
+  }
+}
+
+let appIcon: Electron.NativeImage | null = null;
+
 function createWindow(): void {
   window = new BrowserWindow({
     width: 1240,
@@ -57,6 +86,8 @@ function createWindow(): void {
     minWidth: 980,
     minHeight: 720,
     title: 'Nexa',
+    // Windows and Linux take the window icon; macOS uses the dock icon above.
+    ...(appIcon && process.platform !== 'darwin' ? { icon: appIcon } : {}),
     backgroundColor: '#0d1117',
     show: false,
     webPreferences: {

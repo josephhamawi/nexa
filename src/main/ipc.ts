@@ -12,6 +12,7 @@ import {
   writeEnvValues,
 } from '../config/config';
 import { AppConfigSchema } from '../config/schema';
+import { explainTelegramError } from '../notifications/TelegramNotifier';
 import { childLogger } from '../logging/logger';
 
 const log = childLogger('ipc');
@@ -38,7 +39,13 @@ export function registerIpc(
     }
     try {
       const response = await agent.handleRequest(text, 'desktop', null);
-      return { ok: true, text: response.text, task: response.task, state: agent.dashboardState() };
+      return {
+        ok: true,
+        text: response.text,
+        task: response.task,
+        clarifying: response.clarifying ?? null,
+        state: agent.dashboardState(),
+      };
     } catch (err) {
       log.warn({ err: (err as Error).message }, 'request failed');
       return { ok: false, error: (err as Error).message };
@@ -193,11 +200,29 @@ export function registerIpc(
       return { ok: false, error: `Could not write ${paths.env}: ${(err as Error).message}` };
     }
 
+    // getMe only proves the token is real. Sending a message is what proves the
+    // chat id is reachable, which is the half that usually goes wrong.
     const verified = await agent.notifications.telegram.verify();
-    if (verified.ok) bot.start();
-    return verified.ok
-      ? { ok: true, verified: true, botName: verified.botName ?? null }
-      : { ok: true, verified: false, error: verified.error };
+    if (!verified.ok) {
+      return { ok: true, verified: false, error: explainTelegramError(String(verified.error)) };
+    }
+
+    const delivered = await agent.notifications.telegram.send(
+      `Nexa is connected${verified.botName ? ` via @${verified.botName}` : ''}. ` +
+        'Send me something like "research the latest AI agent frameworks" to get started.',
+    );
+
+    if (!delivered.ok) {
+      return {
+        ok: true,
+        verified: false,
+        botName: verified.botName ?? null,
+        error: explainTelegramError(String(delivered.error)),
+      };
+    }
+
+    bot.start();
+    return { ok: true, verified: true, botName: verified.botName ?? null };
   });
 
   ipcMain.handle('secrets:saveLlm', (_event, payload: unknown) => {

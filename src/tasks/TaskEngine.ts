@@ -15,6 +15,7 @@ import { assertPermitted, type ToolContext, type ToolRegistry, type ToolResult }
 import type { EvidenceStore } from '../evidence/EvidenceStore';
 import type { NotificationManager } from '../notifications/NotificationManager';
 import type { ActivityLog } from '../agent/ActivityLog';
+import { computeConfidence } from '../agent/Confidence';
 import { paths } from '../config/config';
 import { childLogger } from '../logging/logger';
 import { sleep } from '../utils/time';
@@ -475,13 +476,20 @@ export class TaskEngine extends EventEmitter {
   private complete(task: Task): Task {
     const summary = lastSummary(task);
     const nextRun = computeNextRun(task.recurrence);
+    // Scored from what actually happened: sources read, how they were judged,
+    // retries, failures and whether evidence exists to check.
+    const confidence = computeConfidence(task);
 
     let finished = transition(
-      { ...task, phase: AgentPhase.COMPLETED, progress: 100, result: summary, nextRun },
+      { ...task, phase: AgentPhase.COMPLETED, progress: 100, result: summary, nextRun, confidence },
       TaskStatus.COMPLETED,
     );
 
-    this.activity.add(`Completed: ${task.name}`, 'success', task.id);
+    this.activity.add(
+      `Completed: ${task.name} (${confidence.level === 'none' ? 'simulated' : `${confidence.score}% confidence`})`,
+      confidence.level === 'low' ? 'warn' : 'success',
+      task.id,
+    );
     this.emit('completed', finished);
 
     // A recurring task goes straight back into the queue for its next run.

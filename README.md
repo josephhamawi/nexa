@@ -22,7 +22,8 @@ Nexa:  Task created: remote AI engineering jobs
 
 - **Understands a request** in plain language, from the desktop app or Telegram.
 - **Plans** it into concrete steps with a named tool for each one.
-- **Acts**: searches the web, reads pages, drives a real browser, reads approved folders.
+- **Acts**: searches the web, reads pages, drives a real browser, reads approved folders,
+  and once you turn them on, puts events in your calendar, saves notes, and writes mail.
 - **Watches** pages and searches on a schedule, reporting only meaningful change.
 - **Asks** before anything consequential, and stops for a human when a site does.
 - **Reports** with evidence: URLs, timestamps, screenshots, extracted data.
@@ -33,11 +34,116 @@ Nexa:  Task created: remote AI engineering jobs
 - Solve or bypass CAPTCHAs, Cloudflare challenges or any other human check.
 - Enter your passwords. When a site needs a login, it hands you the browser.
 - Read outside the folders you have explicitly allowed.
+- Buy, order or pay for anything, or submit applications and forms as you. Those are
+  refusals by policy, not gaps: no tool you add unlocks them.
+- Send mail, unless you switch sending on yourself. It drafts by default and leaves
+  the message in Drafts for you to read and send.
 - Claim something was done when it was not.
 
 When a page needs a person, the task moves to `WAITING_FOR_HUMAN`, Nexa screenshots
 the state, messages you, and waits. You finish the step, press **Resume**, and it
 carries on from where it stopped.
+
+---
+
+## Making Nexa do a new thing
+
+Every capability is a `Tool` (`src/tools/Tool.ts`). Adding one is three steps,
+and `CalendarTool` is the worked example to copy.
+
+1. **Write the tool.** Implement `Tool`: a tight `inputSchema`, the
+   `permissions` it needs, and `mutating: true` if it changes anything outside
+   Nexa. That flag alone routes it through the approval gate.
+2. **Register it** in `NexaAgent.registerTools()`, or point Nexa at an MCP
+   server in `config.json` and its tools register themselves.
+3. **Nothing else.** The planner is handed the catalogue, the refusal message
+   rebuilds itself from what is registered, and the permission check applies
+   the same way it does to a built-in.
+
+Requests Nexa has no tool for are refused rather than quietly downgraded into a
+web search (`Planner.detectUnsupported`). "Check my mail" is the case that made
+this matter: before the guard covered it, that request came back COMPLETED
+carrying a Google result for Gmail. That guard is keyed to tool names, so
+registering a calendar tool lifts the refusal for calendar requests and nothing
+else. The refusal also survives a plan that *could* have used the tool and did
+not: if the plan for "book the dentist" comes back as a web search, Nexa
+declines instead of reporting a search as a booking.
+
+Capabilities come in two kinds. Most are about acting, so only a tool that
+changes something can satisfy them, which stops a search tool that happens to
+mention "events" from looking like a way to book one. Reading a mailbox is the
+other kind: the tool that answers it is read-only by design.
+
+Two capabilities are never unlocked by any tool: **purchasing** and **form
+submission**. Those are policy.
+
+### Calendar, Notes and Mail
+
+All three are macOS only and all three are off by default. Turn them on under
+**Settings > Agent behaviour**. They drive the apps you already use, so a Gmail
+or Outlook account set up in Mail, or a Google calendar subscribed in Calendar,
+works without Nexa ever holding a token of its own.
+
+The first use of each triggers a macOS prompt to let Nexa control that app.
+Until you answer it, the task parks in `WAITING_FOR_HUMAN` with instructions
+rather than failing silently.
+
+They share one implementation shape, in `src/tools/applescript.ts`:
+
+- Values reach AppleScript as `argv`, never spliced into the script text. There
+  is no subject line or note body that can change what a script does.
+- Writes are idempotent on a natural key (event title plus start time, note
+  title), so a retry after a timeout finds what it already made rather than
+  creating a second copy.
+- Two ordered timeouts, so a hung app surfaces as an explainable AppleScript
+  error rather than a killed process.
+
+**Mail is two tools, not one.** `mail_read` opens the inbox and is read-only,
+so "check my mail" runs without an approval prompt and carries its own
+`MAIL_READ` grant: a task allowed to draft a reply is not thereby allowed to
+read everything that ever arrived.
+
+Reading walks each account's own inbox, newest first, and stops at the first
+message outside the window. It deliberately does not touch Mail's unified
+inbox: that is a concatenation of every account, so it is not in date order,
+and it is enormous.
+
+**Reading mail is slow, so it is bounded by time rather than by hope.** Mail
+costs seconds per message on a large Exchange account, and `with timeout` in
+AppleScript bounds a single Apple event, not a loop of hundreds of them -- so a
+big request used to run past every limit and die with `Command failed:
+/usr/bin/osascript`, returning nothing. The script now carries its own deadline
+(`maxSeconds`), stops itself when it runs out, and returns the newest messages
+it managed to read, saying plainly that the list is partial. Previews cost an
+extra fetch each and are capped well below the message limit for the same
+reason.
+
+**With several accounts, Nexa asks which one** before doing the work, offering
+them as one-click answers, unless the request already says ("check my outlook")
+or a default is set under Settings. That is worth the question twice over: four
+inboxes answer "what came in today" four different ways, and naming one is also
+about 24x faster than reading them all.
+
+**Writing mail drafts by default.** Sending needs a second switch, because
+drafting is recoverable and sending is not. With sending off, asking Nexa to
+send is refused outright rather than quietly downgraded to a draft: believing a
+mail went out when it did not is worse than being told no.
+
+### MCP servers
+
+`config.json` ships a catalogue of servers, all `enabled: false`. Nothing
+spawns until you turn one on.
+
+Two of them are real, official packages: `@modelcontextprotocol/server-filesystem`
+(adds writing files, which the built-in file tool deliberately does not do) and
+`@modelcontextprotocol/server-memory`.
+
+The Gmail, Outlook and Google Calendar entries are **placeholders with no
+package filled in**. There is no official MCP server for any of them. If you
+want one, pick a community server whose source you have read and put it in the
+`command`/`args` yourself, because an enabled server runs on every app launch.
+For most people the built-in mail and calendar tools already cover these
+accounts through the macOS apps, with no server at all.
 
 ---
 
@@ -54,7 +160,8 @@ carries on from where it stopped.
              |
         ToolRegistry         permission-checked capabilities
              |
-  web_research  browser  watcher  analyze  files  notify
+  web_research  browser  watcher  analyze  files  calendar  notes
+  mail  mail_read  notify
              |
       Evidence + Results -> desktop + Telegram
 ```

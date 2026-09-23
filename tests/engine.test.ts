@@ -237,3 +237,60 @@ describe('finding tasks by description', () => {
     expect(engine.findByDescription('nothing like this')).toBeUndefined();
   });
 });
+
+describe('running a task again', () => {
+  it('starts over instead of resuming where the last attempt stopped', async () => {
+    // Regression: "Run again" on a task whose first step had already completed
+    // resumed from the next step and reused the old output, so a mail summary
+    // reported a two-day-old "no messages" without re-reading the inbox.
+    let reads = 0;
+    const engine = engineWith([
+      tool('read', async () => {
+        reads += 1;
+        return { ok: true, summary: `read ${reads}`, data: { items: [reads] } };
+      }),
+    ]);
+
+    const task = engine.add(researchTask([makeStep('read', 'Read something')]));
+    engine.enqueue(task.id);
+    await engine.run(task.id);
+    expect(reads).toBe(1);
+
+    engine.enqueue(task.id);
+    const requeued = engine.get(task.id);
+    expect(requeued?.currentStepIndex).toBe(0);
+    expect(requeued?.steps[0]?.status).toBe('PENDING');
+    expect(requeued?.steps[0]?.output).toBeUndefined();
+    expect(requeued?.steps[0]?.summary).toBeNull();
+
+    await engine.run(task.id);
+    expect(reads).toBe(2);
+    expect((engine.get(task.id)?.steps[0]?.output as { items: number[] }).items).toEqual([2]);
+  });
+
+  it("does not carry the previous run's errors into the next one", async () => {
+    // The old run's failure was reported as "Problems hit" on a later,
+    // unrelated run -- including a message the current code cannot even emit.
+    let shouldFail = true;
+    const engine = engineWith([
+      tool('flaky', async () =>
+        shouldFail
+          ? { ok: false, summary: 'nope', error: 'stale failure' }
+          : { ok: true, summary: 'fine', data: { items: [1] } },
+      ),
+    ]);
+
+    const task = engine.add(researchTask([makeStep('flaky', 'Try')]));
+    engine.enqueue(task.id);
+    const failed = await engine.run(task.id);
+    expect(failed?.errors.map((e) => e.message)).toContain('stale failure');
+
+    shouldFail = false;
+    engine.enqueue(task.id);
+    expect(engine.get(task.id)?.errors).toEqual([]);
+
+    const rerun = await engine.run(task.id);
+    expect(rerun?.status).toBe(TaskStatus.COMPLETED);
+    expect(rerun?.errors).toEqual([]);
+  });
+});

@@ -70,6 +70,14 @@ describe('data at rest', () => {
     store.insert({ id: 'one' });
 
     expect(fs.statSync(path.join(dir, 'tasks.json')).mode & 0o777).toBe(0o600);
+
+    // The case the first version of this test missed: writeFileSync's `mode`
+    // is ignored when the file already exists, so an overwrite must not
+    // silently leave the old, laxer permissions behind.
+    fs.chmodSync(path.join(dir, 'tasks.json'), 0o644);
+    store.insert({ id: 'two' });
+    expect(fs.statSync(path.join(dir, 'tasks.json')).mode & 0o777).toBe(0o600);
+
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

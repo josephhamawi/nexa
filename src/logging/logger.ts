@@ -53,6 +53,12 @@ function buildLogger(): Logger {
   const logFile = path.join(paths.logs, 'nexa.log');
   // Logs carry redacted records, but also URLs, task names and mail subjects.
   const fileStream = fs.createWriteStream(logFile, { flags: 'a', mode: OWNER_ONLY_FILE });
+  // As with config: the mode above is ignored for a log that already exists.
+  try {
+    fs.chmodSync(logFile, OWNER_ONLY_FILE);
+  } catch {
+    // A log we cannot chmod is still a log worth writing.
+  }
 
   const streams: pino.StreamEntry[] = [
     { level: env.LOG_LEVEL, stream: fileStream },

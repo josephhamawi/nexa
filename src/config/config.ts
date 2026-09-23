@@ -192,6 +192,10 @@ export function saveConfig(next: AppConfig): AppConfig {
     encoding: 'utf8',
     mode: OWNER_ONLY_FILE,
   });
+  // `mode` above only applies when the file is created. Writing over an
+  // existing config keeps whatever permissions it already had, so an install
+  // that predates this would stay world-readable forever. chmod every time.
+  fs.chmodSync(paths.config, OWNER_ONLY_FILE);
   cachedConfig = parsed;
   return parsed;
 }

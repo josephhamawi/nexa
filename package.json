@@ -28,7 +28,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "icon": "node scripts/make-icon.mjs",
     "package": "npm run build && electron-builder --mac --publish never",
-    "postinstall": "playwright install chromium"
+    "postinstall": "playwright install chromium",
+    "e2e": "npm run build && tsx e2e/drive.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

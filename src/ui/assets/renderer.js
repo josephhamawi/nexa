@@ -200,10 +200,25 @@ function renderTaskList(container, tasks, emptyNode, compact = false) {
     if (task.result) {
       const result = el('div', 'record-result', task.result.slice(0, 1200));
       if (task.result.length > 400) result.classList.add('clipped');
+      // The preview is cut off, so it doubles as the way into the full thing.
+      result.classList.add('clickable');
+      result.setAttribute('role', 'button');
+      result.setAttribute('tabindex', '0');
+      result.title = 'Show the full result';
+      result.addEventListener('click', () => showResult(task));
+      result.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          showResult(task);
+        }
+      });
       record.append(result);
     }
 
     const actions = el('div', 'record-actions');
+    if (task.result) {
+      actions.append(button('Show', 'btn btn-sm btn-solid', () => showResult(task)));
+    }
     if (task.status === 'WAITING_FOR_APPROVAL') {
       actions.append(button('Approve', 'btn btn-sm btn-solid', () => call(window.nexa.approveTask(task.id, true))));
       actions.append(button('Reject', 'btn btn-sm btn-danger', () => call(window.nexa.approveTask(task.id, false))));
@@ -523,6 +538,19 @@ function fillSettings(next) {
   $('f-approval').checked = Boolean(config.agent.requireApprovalForWrites);
   $('f-demo').checked = Boolean(config.agent.demoMode);
 
+  const automation = config.automation || { shell: {}, apps: {} };
+  $('f-shell-on').checked = Boolean(automation.shell && automation.shell.enabled);
+  $('f-shell-cmds').value = ((automation.shell && automation.shell.allowedCommands) || []).join(', ');
+  $('f-apps-on').checked = Boolean(automation.apps && automation.apps.enabled);
+  $('f-apps-list').value = ((automation.apps && automation.apps.allowedApps) || []).join(', ');
+  $('f-notes-on').checked = Boolean(config.notes && config.notes.enabled);
+  $('f-notes-folder').value = (config.notes && config.notes.defaultFolder) || 'Notes';
+  $('f-mail-on').checked = Boolean(config.mail && config.mail.enabled);
+  $('f-mail-send').checked = Boolean(config.mail && config.mail.allowSend);
+  $('f-mail-account').value = (config.mail && config.mail.defaultAccount) || '';
+  renderMailAccounts((config.mail && config.mail.accounts) || []);
+  $('f-calendar-on').checked = Boolean(config.calendar && config.calendar.enabled);
+  $('f-calendar-name').value = (config.calendar && config.calendar.defaultCalendar) || '';
   $('f-telegram-on').checked = Boolean(config.notifications.telegram);
   $('f-desktop-on').checked = Boolean(config.notifications.desktop);
   $('f-sound-on').checked = Boolean(config.notifications.sound);
@@ -577,6 +605,32 @@ function readSettings() {
       sound: $('f-sound-on').checked,
     },
     files: { allowedDirectories: config.files.allowedDirectories || [] },
+    calendar: {
+      enabled: $('f-calendar-on').checked,
+      defaultCalendar: $('f-calendar-name').value.trim(),
+    },
+    automation: {
+      shell: {
+        enabled: $('f-shell-on').checked,
+        allowedCommands: list($('f-shell-cmds').value),
+      },
+      apps: {
+        enabled: $('f-apps-on').checked,
+        allowedApps: list($('f-apps-list').value),
+      },
+    },
+    notes: {
+      enabled: $('f-notes-on').checked,
+      defaultFolder: $('f-notes-folder').value.trim() || 'Notes',
+    },
+    mail: {
+      enabled: $('f-mail-on').checked,
+      defaultAccount: $('f-mail-account').value.trim(),
+      accounts: (config.mail && config.mail.accounts) || [],
+      // Sending without mail itself being on would be a setting that reads as
+      // enabled and does nothing.
+      allowSend: $('f-mail-on').checked && $('f-mail-send').checked,
+    },
     userProfile: {
       summary: $('f-summary').value.trim(),
       skills: list($('f-skills').value),
@@ -741,6 +795,17 @@ async function boot() {
   window.nexa.onState(render);
   window.nexa.onActivity(prependActivity);
 
+  wireResultDialog();
+
+  $('detect-mail').addEventListener('click', async () => {
+    setStatus('mail-status', 'Asking Mail...');
+    const result = await window.nexa.detectMailAccounts();
+    if (!result.ok) return setStatus('mail-status', result.error || 'Could not read the accounts.', 'bad');
+    config.mail.accounts = result.accounts;
+    renderMailAccounts(result.accounts);
+    setStatus('mail-status', `Found ${result.accounts.length} account(s).`, 'ok');
+  });
+
   // Settings wiring
   $('settings-save').addEventListener('click', async () => {
     setStatus('settings-status', 'Saving...');
@@ -878,3 +943,88 @@ boot().catch((err) => {
     err && err.message ? err.message : String(err)
   }</pre>`;
 });
+
+/** Offers the detected accounts as completions for the default-account field. */
+function renderMailAccounts(accounts) {
+  const list = $('mail-accounts');
+  list.innerHTML = '';
+  for (const account of accounts) {
+    const option = document.createElement('option');
+    option.value = account;
+    list.append(option);
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────── result dialog */
+
+/** The task whose result is on screen, so Copy knows what to copy. */
+let shownResult = null;
+
+/**
+ * Opens the full result of a task.
+ *
+ * The card can only ever show a clipped preview -- a list of tasks each
+ * carrying a full report is unreadable -- so everything the task actually
+ * produced, evidence included, lives here.
+ */
+function showResult(task) {
+  const dialog = $('result-dialog');
+  shownResult = task.result || '';
+
+  $('result-dialog-title').textContent = task.name || task.naturalLanguageRequest || 'Result';
+
+  const bits = [prettyStatus(task.status)];
+  if (task.lastRun) bits.push(`last ${whenOf(task.lastRun)}`);
+  if (task.confidence && task.confidence.level !== 'none') bits.push(`confidence ${task.confidence.score}%`);
+  $('result-dialog-sub').textContent = bits.join('  ·  ');
+
+  const body = $('result-dialog-body');
+  body.innerHTML = '';
+  body.append(el('div', null, task.result || 'This task produced no result text.'));
+
+  const evidence = (task.evidence || []).filter((item) => item.path);
+  if (evidence.length > 0) {
+    const section = el('div', 'result-dialog-evidence');
+    section.append(el('h3', null, `Evidence (${evidence.length})`));
+
+    for (const item of evidence) {
+      const row = el('div', 'result-dialog-evidence-row');
+      row.append(el('span', null, item.title || item.path));
+      row.append(
+        button('Open', 'btn btn-sm btn-quiet', async () => {
+          const res = await window.nexa.openEvidence(item.path);
+          if (!res.ok) setStatus('result-dialog-status', res.error || 'Could not open that file.', 'bad');
+        }),
+      );
+      section.append(row);
+    }
+    body.append(section);
+  }
+
+  setStatus('result-dialog-status', '');
+  body.scrollTop = 0;
+  dialog.showModal();
+  body.focus();
+}
+
+function wireResultDialog() {
+  const dialog = $('result-dialog');
+
+  $('result-dialog-close').addEventListener('click', () => dialog.close());
+
+  // Clicking the backdrop closes it. The dialog element itself is the click
+  // target when the backdrop is hit, so compare against it directly.
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+
+  dialog.addEventListener('close', () => {
+    shownResult = null;
+  });
+
+  $('result-dialog-copy').addEventListener('click', async () => {
+    if (!shownResult) return;
+    const res = await window.nexa.copyText(shownResult);
+    setStatus('result-dialog-status', res.ok ? 'Copied.' : res.error || 'Could not copy.', res.ok ? 'ok' : 'bad');
+  });
+}

@@ -113,10 +113,27 @@ export class TaskEngine extends EventEmitter {
 
   // ------------------------------------------------------------- transitions
 
+  /**
+   * Queues a task for a fresh run, from its first step.
+   *
+   * The reset is the point. Without it "Run again" resumed from wherever the
+   * last attempt stopped and reused that attempt's outputs -- so a re-run of a
+   * mail summary reported a two-day-old "no messages" without ever opening
+   * Mail again, and carried the old run's errors with it. Resuming is what
+   * `resume()` is for; this is a re-run.
+   */
   enqueue(taskId: string): Task | undefined {
     const task = this.get(taskId);
     if (!task) return undefined;
-    const next = transition({ ...task, nextRun: task.nextRun ?? new Date().toISOString() }, TaskStatus.QUEUED);
+
+    // A fresh run, not a resume. Without the rewind, "Run again" carried on
+    // from wherever the last attempt stopped and reused its outputs -- so a
+    // re-run reported a two-day-old result without re-reading anything.
+    // Continuing a paused or parked task is `resume()`.
+    const next = transition(
+      { ...freshRun(task), nextRun: task.nextRun ?? new Date().toISOString() },
+      TaskStatus.QUEUED,
+    );
     return this.save(next);
   }
 
@@ -344,6 +361,7 @@ export class TaskEngine extends EventEmitter {
             status: 'DONE' as const,
             finishedAt: new Date().toISOString(),
             output: result.data,
+            summary: result.summary,
             error: null,
           }),
           currentStepIndex: index + 1,
@@ -494,15 +512,7 @@ export class TaskEngine extends EventEmitter {
 
     // A recurring task goes straight back into the queue for its next run.
     if (nextRun) {
-      finished = transition(
-        {
-          ...finished,
-          currentStepIndex: 0,
-          steps: finished.steps.map((step) => ({ ...step, status: 'PENDING' as const, output: undefined, error: null })),
-          progress: 0,
-        },
-        TaskStatus.QUEUED,
-      );
+      finished = transition(freshRun(finished), TaskStatus.QUEUED);
       this.activity.add(`Next run ${new Date(nextRun).toLocaleString()}`, 'info', task.id);
     }
 
@@ -601,3 +611,32 @@ function phaseFor(toolName: string): AgentPhase {
 }
 
 export type { Evidence };
+
+/**
+ * A task rewound to its first step, ready to run again from scratch.
+ *
+ * Both re-run paths -- the Run again button and a recurring task's next
+ * occurrence -- go through here. They used to reset different subsets of the
+ * step fields, which is how a re-run could keep a previous attempt's output
+ * and report it as this run's answer.
+ */
+function freshRun(task: Task): Task {
+  return {
+    ...task,
+    steps: task.steps.map((step) => ({
+      ...step,
+      status: 'PENDING' as const,
+      startedAt: null,
+      finishedAt: null,
+      output: undefined,
+      summary: null,
+      error: null,
+      attempts: 0,
+    })),
+    currentStepIndex: 0,
+    progress: 0,
+    // Errors are reported as "problems hit" on the run that produced them.
+    // Carrying them forward blames this run for the last one's failures.
+    errors: [],
+  };
+}

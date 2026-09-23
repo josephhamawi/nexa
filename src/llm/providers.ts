@@ -5,6 +5,7 @@ import {
   type LlmProvider,
 } from './LLMProvider';
 import { loadConfig, loadEnv } from '../config/config';
+import type { Effort } from '../config/schema';
 import { childLogger } from '../logging/logger';
 
 const log = childLogger('llm');
@@ -44,7 +45,7 @@ export class AnthropicProvider implements LlmProvider {
   constructor(
     readonly model: string,
     private readonly apiKey: string,
-    private readonly defaults: { maxOutputTokens: number; temperature: number },
+    private readonly defaults: { maxOutputTokens: number; effort: Effort },
   ) {}
 
   get available(): boolean {
@@ -62,11 +63,23 @@ export class AnthropicProvider implements LlmProvider {
       .filter((m) => m.role !== 'system')
       .map((m) => ({ role: m.role, content: m.content }));
 
+    // No `temperature`, `top_p` or `top_k`.
+    //
+    // Every current Claude model rejects them outright: Sonnet 5 answers a
+    // request carrying one with `400 ... \`temperature\` is deprecated for this
+    // model`, which Nexa was catching and quietly downgrading to rule-based
+    // planning. Depth is `output_config.effort` now.
     const body = {
       model: this.model,
       max_tokens: request.maxOutputTokens ?? this.defaults.maxOutputTokens,
-      temperature: request.temperature ?? this.defaults.temperature,
-      ...(system ? { system } : {}),
+      output_config: { effort: this.defaults.effort },
+      // Cache the system prompt. Nexa sends the same ~1.2k-token tool
+      // catalogue on every planning call, and a cache read costs about a tenth
+      // of a fresh read. Callers keep anything volatile (clocks, the request
+      // itself) in the user turn, or this never hits.
+      ...(system
+        ? { system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] }
+        : {}),
       messages,
     };
 
@@ -76,7 +89,12 @@ export class AnthropicProvider implements LlmProvider {
       body,
     )) as {
       content?: { type: string; text?: string }[];
-      usage?: { input_tokens?: number; output_tokens?: number };
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_creation_input_tokens?: number;
+        cache_read_input_tokens?: number;
+      };
     };
 
     const text = (json.content ?? [])
@@ -84,11 +102,22 @@ export class AnthropicProvider implements LlmProvider {
       .map((block) => block.text ?? '')
       .join('');
 
+    const usage = json.usage;
+    log.debug(
+      {
+        input: usage?.input_tokens,
+        cacheWrite: usage?.cache_creation_input_tokens,
+        cacheRead: usage?.cache_read_input_tokens,
+      },
+      'anthropic usage',
+    );
+
     return {
       text,
       model: this.model,
-      inputTokens: json.usage?.input_tokens,
-      outputTokens: json.usage?.output_tokens,
+      inputTokens: usage?.input_tokens,
+      outputTokens: usage?.output_tokens,
+      cachedInputTokens: usage?.cache_read_input_tokens,
     };
   }
 }
@@ -164,8 +193,11 @@ export function createLlmProvider(
   };
 
   if (config.llm.provider === 'anthropic' && env.ANTHROPIC_API_KEY) {
-    log.info({ model: config.llm.model }, 'using Anthropic provider');
-    return new AnthropicProvider(config.llm.model, env.ANTHROPIC_API_KEY, defaults);
+    log.info({ model: config.llm.model, effort: config.llm.effort }, 'using Anthropic provider');
+    return new AnthropicProvider(config.llm.model, env.ANTHROPIC_API_KEY, {
+      maxOutputTokens: config.llm.maxOutputTokens,
+      effort: config.llm.effort,
+    });
   }
 
   if (config.llm.provider === 'openai-compatible') {

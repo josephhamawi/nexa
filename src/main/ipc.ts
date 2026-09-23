@@ -1,6 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import { app, ipcMain, shell, dialog, type BrowserWindow } from 'electron';
+import { app, clipboard, ipcMain, shell, dialog, type BrowserWindow } from 'electron';
 import { ZodError } from 'zod';
 import type { NexaAgent } from '../agent/NexaAgent';
 import type { TelegramBot } from '../telegram/TelegramBot';
@@ -11,9 +11,10 @@ import {
   paths,
   writeEnvValues,
 } from '../config/config';
-import { AppConfigSchema } from '../config/schema';
+import { AppConfigSchema, type AppConfig } from '../config/schema';
 import { detectChats, explainTelegramError } from '../notifications/TelegramNotifier';
 import { childLogger } from '../logging/logger';
+import { MailReadTool } from '../tools/MailReadTool';
 
 const log = childLogger('ipc');
 
@@ -131,20 +132,38 @@ export function registerIpc(
   // ----------------------------------------------------------------- config
   ipcMain.handle('config:get', () => loadConfig(true));
 
+  /**
+   * Merges a settings patch over the stored config.
+   *
+   * Every section has to be listed. A section left out here does not survive a
+   * save: the schema fills it with its defaults, so the omission reads as the
+   * user having switched the feature off rather than as a bug.
+   */
+  const mergeConfig = (patch: unknown): AppConfig => {
+    const current = loadConfig(true);
+    const incoming = (patch ?? {}) as Record<string, Record<string, unknown>>;
+    return AppConfigSchema.parse({
+      llm: { ...current.llm, ...(incoming.llm ?? {}) },
+      telegram: { ...current.telegram, ...(incoming.telegram ?? {}) },
+      agent: { ...current.agent, ...(incoming.agent ?? {}) },
+      files: { ...current.files, ...(incoming.files ?? {}) },
+      calendar: { ...current.calendar, ...(incoming.calendar ?? {}) },
+      notes: { ...current.notes, ...(incoming.notes ?? {}) },
+      mail: { ...current.mail, ...(incoming.mail ?? {}) },
+      automation: {
+        shell: { ...current.automation.shell, ...((incoming.automation as Record<string, unknown>)?.shell ?? {}) },
+        apps: { ...current.automation.apps, ...((incoming.automation as Record<string, unknown>)?.apps ?? {}) },
+      },
+      notifications: { ...current.notifications, ...(incoming.notifications ?? {}) },
+      userProfile: { ...current.userProfile, ...(incoming.userProfile ?? {}) },
+      mcpServers: incoming.mcpServers ?? current.mcpServers,
+      browserProfiles: incoming.browserProfiles ?? current.browserProfiles,
+    });
+  };
+
   ipcMain.handle('config:save', (_event, patch: unknown) => {
     try {
-      const current = loadConfig(true);
-      const incoming = (patch ?? {}) as Record<string, Record<string, unknown>>;
-      const merged = AppConfigSchema.parse({
-        llm: { ...current.llm, ...(incoming.llm ?? {}) },
-        telegram: { ...current.telegram, ...(incoming.telegram ?? {}) },
-        agent: { ...current.agent, ...(incoming.agent ?? {}) },
-        files: { ...current.files, ...(incoming.files ?? {}) },
-        notifications: { ...current.notifications, ...(incoming.notifications ?? {}) },
-        userProfile: { ...current.userProfile, ...(incoming.userProfile ?? {}) },
-        browserProfiles: incoming.browserProfiles ?? current.browserProfiles,
-      });
-      const saved = agent.applyConfig(merged);
+      const saved = agent.applyConfig(mergeConfig(patch));
       bot.updateConfig(saved.telegram);
       return { ok: true, config: saved };
     } catch (err) {
@@ -281,6 +300,52 @@ export function registerIpc(
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
+  });
+
+  /**
+   * Writing to the clipboard from the renderer.
+   *
+   * navigator.clipboard is unreliable for a page loaded over file://, and a
+   * silent failure on Copy is the kind of thing nobody reports and everybody
+   * resents. Going through the main process makes it deterministic.
+   */
+  /**
+   * Reads the account list out of Mail and caches it in config.
+   *
+   * Cached because the clarifier needs the names on every mail request, and
+   * paying an Apple event each time would make Nexa feel broken.
+   */
+  ipcMain.handle('mail:detectAccounts', async () => {
+    try {
+      const tool = new MailReadTool(() => loadConfig().mail);
+      const result = await tool.execute(
+        {
+          operation: 'list_accounts',
+          account: '',
+          sinceHours: 24,
+          unreadOnly: true,
+          maxMessages: 1,
+          maxSeconds: 60,
+          includePreview: false,
+        },
+        { report: () => undefined, addEvidence: () => undefined } as never,
+      );
+
+      if (!result.ok) return { ok: false, error: result.error ?? result.needsHuman?.reason ?? result.summary };
+
+      const accounts = (result.data as { accounts: { name: string }[] }).accounts.map((a) => a.name);
+      const saved = agent.applyConfig(mergeConfig({ mail: { accounts } }));
+      return { ok: true, accounts, config: saved };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle('clipboard:write', (_event, text: unknown) => {
+    if (typeof text !== 'string') return { ok: false, error: 'nothing to copy' };
+    if (text.length > 5_000_000) return { ok: false, error: 'that result is too large to copy' };
+    clipboard.writeText(text);
+    return { ok: true };
   });
 
   ipcMain.handle('notifications:test', async () => agent.notifications.test());

@@ -178,3 +178,44 @@ describe('merged requests stay clean', () => {
     expect(clarifier.merge('find me some jobs', questions, [''])).toBe('find me some jobs');
   });
 });
+
+
+describe('choosing between mail accounts', () => {
+  const accounts = ['iCloud', 'you@outlook.com', 'you@hotmail.com'];
+  const profile = UserProfileSchema.parse({});
+  const clarifier = new Clarifier(new NullProvider());
+
+  it('asks which account when several exist and none was named', () => {
+    const result = clarifier.assessWithRules('check my mail for new mails today', profile, accounts);
+    const question = result.questions.find((q) => q.id === 'mail_account');
+    expect(question).toBeDefined();
+    expect(question?.suggestions).toContain('iCloud');
+    expect(question?.suggestions).toContain('all of them');
+    expect(result.clear).toBe(false);
+  });
+
+  it('does not ask when the request already names one', () => {
+    for (const ask of ['check my outlook mail', 'anything new in my hotmail inbox', 'read mail in iCloud']) {
+      expect(clarifier.assessWithRules(ask, profile, accounts).questions.map((q) => q.id)).not.toContain(
+        'mail_account',
+      );
+    }
+  });
+
+  it('does not ask when there is only one account, or none to offer', () => {
+    expect(clarifier.assessWithRules('check my mail', profile, ['iCloud']).questions).toHaveLength(0);
+    // The agent passes an empty list once a default is configured.
+    expect(clarifier.assessWithRules('check my mail', profile, []).questions).toHaveLength(0);
+  });
+
+  it('does not call a short mail request vague, now that mail is a real capability', () => {
+    const result = clarifier.assessWithRules('check my mail', profile, []);
+    expect(result.questions.map((q) => q.id)).not.toContain('topic');
+    expect(result.clear).toBe(true);
+  });
+
+  it('stays out of the way of requests that are not about mail', () => {
+    const result = clarifier.assessWithRules('research remote AI jobs', profile, accounts);
+    expect(result.questions.map((q) => q.id)).not.toContain('mail_account');
+  });
+});

@@ -7,7 +7,7 @@
     "name": "Rami Zoohbi",
     "email": "rami.zoohbi@gmail.com"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "main": "dist/main/main.js",
   "engines": {
     "node": ">=20.10.0"
@@ -28,7 +28,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "icon": "node scripts/make-icon.mjs",
     "package": "npm run build && electron-builder --mac --publish never",
-    "postinstall": "playwright install chromium"
+    "postinstall": "playwright install chromium",
+    "e2e": "npm run build && tsx e2e/drive.ts",
+    "screenshots": "npm run build && tsx e2e/screenshots.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
@@ -90,8 +92,12 @@
       ],
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
-      "identity": null,
-      "darkModeSupport": true
+      "darkModeSupport": true,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
     },
     "dmg": {
       "title": "Nexa"

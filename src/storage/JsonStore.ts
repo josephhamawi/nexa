@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ensureDataDirs } from '../config/config';
+import { ensureDataDirs , OWNER_ONLY_FILE } from '../config/config';
 import { childLogger } from '../logging/logger';
 
 const log = childLogger('store');
@@ -39,7 +39,10 @@ export class JsonStore<T extends { id: string }> {
     try {
       ensureDataDirs();
       const tmp = `${this.file}.tmp`;
-      fs.writeFileSync(tmp, `${JSON.stringify(this.items, null, 2)}\n`, 'utf8');
+      fs.writeFileSync(tmp, `${JSON.stringify(this.items, null, 2)}\n`, {
+        encoding: 'utf8',
+        mode: OWNER_ONLY_FILE,
+      });
       fs.renameSync(tmp, this.file);
       this.onChange?.();
     } catch (err) {

@@ -1,10 +1,23 @@
+<div align="center">
+
+<img src="build/icon.png" width="104" alt="Nexa">
+
 # Nexa
 
-**Your AI operations agent.** Tell Nexa what you need, and it researches, monitors
-websites, runs browser workflows, manages recurring tasks, analyses what it finds,
-and reports back through the desktop app and Telegram.
+**Your AI operations agent.** Tell Nexa what you need, and it researches,
+monitors websites, runs browser workflows, manages recurring tasks, reads your
+mail and calendar, drives other apps, and reports back.
 
 Nexa is not a chat window. It plans, acts, verifies and reports.
+
+[Getting started](docs/GETTING-STARTED.md) ·
+[Security](#security) ·
+[Adding a tool](#making-nexa-do-a-new-thing) ·
+[hello@kodefoundry.com](mailto:hello@kodefoundry.com)
+
+![Nexa](docs/screenshots/01-overview.png)
+
+</div>
 
 ```
 You:   Find 5 remote AI engineering jobs that match my profile.
@@ -16,13 +29,16 @@ Nexa:  Task created: remote AI engineering jobs
        I will report back when it is done.
 ```
 
+macOS · runs entirely on your machine · MIT licensed
+
 ---
 
 ## What it does
 
 - **Understands a request** in plain language, from the desktop app or Telegram.
 - **Plans** it into concrete steps with a named tool for each one.
-- **Acts**: searches the web, reads pages, drives a real browser, reads approved folders.
+- **Acts**: searches the web, reads pages, drives a real browser, reads approved folders,
+  and once you turn them on, puts events in your calendar, saves notes, and writes mail.
 - **Watches** pages and searches on a schedule, reporting only meaningful change.
 - **Asks** before anything consequential, and stops for a human when a site does.
 - **Reports** with evidence: URLs, timestamps, screenshots, extracted data.
@@ -33,11 +49,118 @@ Nexa:  Task created: remote AI engineering jobs
 - Solve or bypass CAPTCHAs, Cloudflare challenges or any other human check.
 - Enter your passwords. When a site needs a login, it hands you the browser.
 - Read outside the folders you have explicitly allowed.
+- Buy, order or pay for anything, or submit applications and forms as you. Those are
+  refusals by policy, not gaps: no tool you add unlocks them.
+- Send mail, unless you switch sending on yourself. It drafts by default and leaves
+  the message in Drafts for you to read and send.
 - Claim something was done when it was not.
+
+![Asking Nexa for something in plain language](docs/screenshots/07-request.png)
 
 When a page needs a person, the task moves to `WAITING_FOR_HUMAN`, Nexa screenshots
 the state, messages you, and waits. You finish the step, press **Resume**, and it
 carries on from where it stopped.
+
+---
+
+## Making Nexa do a new thing
+
+Every capability is a `Tool` (`src/tools/Tool.ts`). Adding one is three steps,
+and `CalendarTool` is the worked example to copy.
+
+1. **Write the tool.** Implement `Tool`: a tight `inputSchema`, the
+   `permissions` it needs, and `mutating: true` if it changes anything outside
+   Nexa. That flag alone routes it through the approval gate.
+2. **Register it** in `NexaAgent.registerTools()`, or point Nexa at an MCP
+   server in `config.json` and its tools register themselves.
+3. **Nothing else.** The planner is handed the catalogue, the refusal message
+   rebuilds itself from what is registered, and the permission check applies
+   the same way it does to a built-in.
+
+Requests Nexa has no tool for are refused rather than quietly downgraded into a
+web search (`Planner.detectUnsupported`). "Check my mail" is the case that made
+this matter: before the guard covered it, that request came back COMPLETED
+carrying a Google result for Gmail. That guard is keyed to tool names, so
+registering a calendar tool lifts the refusal for calendar requests and nothing
+else. The refusal also survives a plan that *could* have used the tool and did
+not: if the plan for "book the dentist" comes back as a web search, Nexa
+declines instead of reporting a search as a booking.
+
+Capabilities come in two kinds. Most are about acting, so only a tool that
+changes something can satisfy them, which stops a search tool that happens to
+mention "events" from looking like a way to book one. Reading a mailbox is the
+other kind: the tool that answers it is read-only by design.
+
+Two capabilities are never unlocked by any tool: **purchasing** and **form
+submission**. Those are policy.
+
+### Calendar, Notes and Mail
+
+All three are macOS only and all three are off by default. Turn them on under
+**Settings > Agent behaviour**. They drive the apps you already use, so a Gmail
+or Outlook account set up in Mail, or a Google calendar subscribed in Calendar,
+works without Nexa ever holding a token of its own.
+
+The first use of each triggers a macOS prompt to let Nexa control that app.
+Until you answer it, the task parks in `WAITING_FOR_HUMAN` with instructions
+rather than failing silently.
+
+They share one implementation shape, in `src/tools/applescript.ts`:
+
+- Values reach AppleScript as `argv`, never spliced into the script text. There
+  is no subject line or note body that can change what a script does.
+- Writes are idempotent on a natural key (event title plus start time, note
+  title), so a retry after a timeout finds what it already made rather than
+  creating a second copy.
+- Two ordered timeouts, so a hung app surfaces as an explainable AppleScript
+  error rather than a killed process.
+
+**Mail is two tools, not one.** `mail_read` opens the inbox and is read-only,
+so "check my mail" runs without an approval prompt and carries its own
+`MAIL_READ` grant: a task allowed to draft a reply is not thereby allowed to
+read everything that ever arrived.
+
+Reading walks each account's own inbox, newest first, and stops at the first
+message outside the window. It deliberately does not touch Mail's unified
+inbox: that is a concatenation of every account, so it is not in date order,
+and it is enormous.
+
+**Reading mail is slow, so it is bounded by time rather than by hope.** Mail
+costs seconds per message on a large Exchange account, and `with timeout` in
+AppleScript bounds a single Apple event, not a loop of hundreds of them -- so a
+big request used to run past every limit and die with `Command failed:
+/usr/bin/osascript`, returning nothing. The script now carries its own deadline
+(`maxSeconds`), stops itself when it runs out, and returns the newest messages
+it managed to read, saying plainly that the list is partial. Previews cost an
+extra fetch each and are capped well below the message limit for the same
+reason.
+
+**With several accounts, Nexa asks which one** before doing the work, offering
+them as one-click answers, unless the request already says ("check my outlook")
+or a default is set under Settings. That is worth the question twice over: four
+inboxes answer "what came in today" four different ways, and naming one is also
+about 24x faster than reading them all.
+
+**Writing mail drafts by default.** Sending needs a second switch, because
+drafting is recoverable and sending is not. With sending off, asking Nexa to
+send is refused outright rather than quietly downgraded to a draft: believing a
+mail went out when it did not is worse than being told no.
+
+### MCP servers
+
+`config.json` ships a catalogue of servers, all `enabled: false`. Nothing
+spawns until you turn one on.
+
+Two of them are real, official packages: `@modelcontextprotocol/server-filesystem`
+(adds writing files, which the built-in file tool deliberately does not do) and
+`@modelcontextprotocol/server-memory`.
+
+The Gmail, Outlook and Google Calendar entries are **placeholders with no
+package filled in**. There is no official MCP server for any of them. If you
+want one, pick a community server whose source you have read and put it in the
+`command`/`args` yourself, because an enabled server runs on every app launch.
+For most people the built-in mail and calendar tools already cover these
+accounts through the macOS apps, with no server at all.
 
 ---
 
@@ -54,7 +177,8 @@ carries on from where it stopped.
              |
         ToolRegistry         permission-checked capabilities
              |
-  web_research  browser  watcher  analyze  files  notify
+  web_research  browser  watcher  analyze  files  calendar  notes
+  mail  mail_read  notify
              |
       Evidence + Results -> desktop + Telegram
 ```
@@ -309,6 +433,16 @@ floor. Nothing is hard-coded.
 
 ---
 
+Every task keeps its plan, its progress and its evidence.
+
+![Tasks, with their plan and progress](docs/screenshots/02-tasks.png)
+
+Open any result in full, with the confidence score that produced it.
+
+![A finished result](docs/screenshots/03-result.png)
+
+---
+
 ## Watcher examples
 
 A watcher stores a normalised snapshot and compares future readings against it.
@@ -328,16 +462,59 @@ over-eager request is raised to it rather than accepted.
 
 ---
 
+![Watchers, checked on a schedule](docs/screenshots/04-watchers.png)
+
+---
+
 ## Security
 
+Nexa holds credentials that can spend money and read your mail, and it drives
+apps that hold everything else.
+
+Anything that changes something outside Nexa waits for you.
+
+![Approvals](docs/screenshots/05-approvals.png)
+
+Every capability is off until you turn it on, and the lists bound what it can
+reach even then.
+
+![Settings](docs/screenshots/06-settings.png)
+
+**Secrets are encrypted at rest.** The API key and Telegram token are stored
+through the OS keychain (Electron's `safeStorage`), so the file on disk is
+ciphertext rather than readable text. `npm run doctor` reports which mode is
+active. The CLI entry points run outside Electron and have no keychain, so
+they fall back to a `0600` plaintext file; a hand-written `.env` keeps working
+and is still read first. Secrets are never echoed back to the UI.
+
+**The app is signed** with a Developer ID certificate and runs under the
+hardened runtime. The entitlement that matters is
+`com.apple.security.automation.apple-events`: without it the hardened runtime
+blocks the calendar, notes and mail tools while leaving everything else
+working, which is a confusing way to fail. Notarization is a separate step:
+
+```
+xcrun notarytool store-credentials notarytool \
+  --apple-id you@example.com --team-id YOURTEAMID --password <app-specific-password>
+```
+
+Then set `"notarize": true` under `build.mac`. Until that is done the app is
+signed but not notarized, so a first launch on another Mac needs
+right-click > Open.
+
+The rest:
+
 - Telegram is restricted to your chat id; anything else is refused and logged.
-- Secrets are environment-only, written `chmod 600`, never echoed to the UI.
 - The logger redacts passwords, tokens, cookies, API keys and OTPs at every
   nesting level; URLs are logged with query strings stripped.
 - The file tool refuses any path outside your allowed folders, traversal
   included, and declines binary formats rather than returning garbage.
-- Tasks carry explicit permissions; a tool needing more is refused.
-- Mutating steps require approval when `requireApprovalForWrites` is on.
+- Tasks carry explicit permissions; a tool needing more is refused. Reading
+  mail and writing mail are separate grants.
+- Mutating steps require approval when `requireApprovalForWrites` is on, and
+  sending mail needs a second switch beyond that.
+- Values reach AppleScript as `argv`, never spliced into the script text, so
+  no subject line or note body can change what a script does.
 - The renderer runs with context isolation, no Node integration, and a strict
   CSP (`default-src 'none'`). Its only capability is the IPC surface in
   `src/main/preload.ts`, and evidence files open only from Nexa's own directory.
@@ -350,9 +527,9 @@ Settings → Agent behaviour → Demo mode. Nexa plans and executes exactly as
 usual, but research and browser steps are simulated locally and **every result is
 labelled `[SIMULATED]`**. Nothing is contacted.
 
-It exists to demonstrate the whole flow — natural-language task creation,
+It exists to demonstrate the whole flow: natural-language task creation,
 planning, execution, analysis, notification, approval, takeover, history and
-evidence — without depending on the network. Simulated output is never presented
+evidence, without depending on the network. Simulated output is never presented
 as real.
 
 ---
@@ -413,3 +590,17 @@ multiple concurrent tasks, more watcher types, a daily briefing digest.
 **Later**: the architecture is deliberately local-first, but the layering
 (agent → engines → tools) is designed so execution could move to a remote
 worker, with multiple users and shared workflows, without rewriting the core.
+
+---
+
+## Contact
+
+- **Bugs and features**: [GitHub issues](https://github.com/josephhamawi/nexa/issues)
+- **Everything else, including security reports**: hello@kodefoundry.com
+
+Please report security issues by email rather than in a public issue.
+
+---
+
+Built by [Kode Foundry](mailto:hello@kodefoundry.com). MIT licensed, see
+[LICENSE](LICENSE).

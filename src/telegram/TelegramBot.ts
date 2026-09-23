@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { loadEnv, paths, ensureDataDirs } from '../config/config';
+import { loadEnv, paths, ensureDataDirs , OWNER_ONLY_FILE } from '../config/config';
 import type { TelegramConfig } from '../config/schema';
 import type { NexaAgent } from '../agent/NexaAgent';
 import type { TelegramNotifier, TelegramUpdate } from '../notifications/TelegramNotifier';
@@ -165,7 +165,10 @@ export class TelegramBot {
   private writeOffset(): void {
     try {
       ensureDataDirs();
-      fs.writeFileSync(paths.telegramOffsetFile, JSON.stringify({ offset: this.offset }), 'utf8');
+      fs.writeFileSync(paths.telegramOffsetFile, JSON.stringify({ offset: this.offset }), {
+        encoding: 'utf8',
+        mode: OWNER_ONLY_FILE,
+      });
     } catch {
       // Losing the offset only risks replaying one command.
     }

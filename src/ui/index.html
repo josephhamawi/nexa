@@ -390,6 +390,86 @@
                 </div>
               </fieldset>
               <fieldset class="field field-wide">
+                <span>Calendar</span>
+                <div class="checks">
+                  <label><input id="f-calendar-on" type="checkbox" /> Let Nexa put events in my calendar</label>
+                </div>
+                <label class="field">
+                  <span>Default calendar</span>
+                  <input id="f-calendar-name" type="text" placeholder="Home" />
+                </label>
+                <small>
+                  macOS only. It asks before every event, and writes only to the calendar named here.
+                  The first event triggers a macOS permission prompt for Calendar.
+                </small>
+              </fieldset>
+              <fieldset class="field field-wide">
+                <span>Notes</span>
+                <div class="checks">
+                  <label><input id="f-notes-on" type="checkbox" /> Let Nexa save notes to my Notes app</label>
+                </div>
+                <label class="field">
+                  <span>Default folder</span>
+                  <input id="f-notes-folder" type="text" placeholder="Notes" />
+                </label>
+                <small>macOS only. It asks before every note.</small>
+              </fieldset>
+              <fieldset class="field field-wide">
+                <span>Mail</span>
+                <div class="checks">
+                  <label><input id="f-mail-on" type="checkbox" /> Let Nexa write email in the Mail app</label>
+                  <label><input id="f-mail-send" type="checkbox" /> Let Nexa send mail, not just draft it</label>
+                </div>
+                <label class="field">
+                  <span>Default account</span>
+                  <div class="field-row">
+                    <input id="f-mail-account" type="text" list="mail-accounts" placeholder="Ask me each time" />
+                    <button type="button" id="detect-mail" class="btn btn-quiet btn-sm">Detect</button>
+                  </div>
+                  <datalist id="mail-accounts"></datalist>
+                  <small id="mail-account-hint">
+                    Press Detect to read the account list from Mail. Leave this empty and Nexa asks which
+                    account to use whenever a request does not say.
+                  </small>
+                </label>
+                <small>
+                  macOS only, and it uses whatever accounts Mail already has, including Gmail and Outlook.
+                  With sending off, Nexa leaves the message in Drafts for you to read and send yourself.
+                  Sending is the one thing here you cannot take back, which is why it is a second switch.
+                </small>
+                <span id="mail-status" class="form-status"></span>
+              </fieldset>
+              <fieldset class="field field-wide">
+                <span>Run commands</span>
+                <div class="checks">
+                  <label><input id="f-shell-on" type="checkbox" /> Let Nexa run commands I list</label>
+                </div>
+                <label class="field">
+                  <span>Allowed commands</span>
+                  <input id="f-shell-cmds" type="text" placeholder="git, ls, python3 (comma separated)" />
+                </label>
+                <small>
+                  Named programs only, never a shell: pipes, redirects and <code>&amp;&amp;</code> are refused, so
+                  one allowed command cannot chain another. Nexa asks before every run. Leave the list empty
+                  and nothing can run at all.
+                </small>
+              </fieldset>
+              <fieldset class="field field-wide">
+                <span>Control other apps</span>
+                <div class="checks">
+                  <label><input id="f-apps-on" type="checkbox" /> Let Nexa drive the apps I list</label>
+                </div>
+                <label class="field">
+                  <span>Allowed apps</span>
+                  <input id="f-apps-list" type="text" placeholder="Finder, Music, Safari (comma separated)" />
+                </label>
+                <small>
+                  The broadest thing Nexa can do, so it is the most limited: only these apps, one statement at
+                  a time, and anything that escapes the named app is refused. An app you allow can still do
+                  whatever that app can do, so list only ones you would hand over.
+                </small>
+              </fieldset>
+              <fieldset class="field field-wide">
                 <span>Folders Nexa may read</span>
                 <div id="folder-list" class="folder-list"></div>
                 <button type="button" id="add-folder" class="btn btn-quiet btn-sm">Add folder</button>
@@ -410,6 +490,26 @@
         </footer>
       </main>
     </div>
+
+    <!--
+      A native <dialog> rather than a div: it gives the focus trap, the Esc
+      handler and the inert background for free, which a hand-rolled overlay
+      would have to reimplement and usually gets wrong.
+    -->
+    <dialog id="result-dialog" class="result-dialog" aria-labelledby="result-dialog-title">
+      <header class="result-dialog-head">
+        <div>
+          <h2 id="result-dialog-title"></h2>
+          <p id="result-dialog-sub" class="result-dialog-sub"></p>
+        </div>
+        <button type="button" id="result-dialog-close" class="btn btn-quiet btn-sm" aria-label="Close">Close</button>
+      </header>
+      <div id="result-dialog-body" class="result-dialog-body" tabindex="0"></div>
+      <footer class="result-dialog-foot">
+        <button type="button" id="result-dialog-copy" class="btn btn-quiet btn-sm">Copy</button>
+        <span id="result-dialog-status" class="form-status"></span>
+      </footer>
+    </dialog>
 
     <script src="assets/renderer.js"></script>
   </body>

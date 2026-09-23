@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
 import { AppConfigSchema, EnvSchema, type AppConfig, type Env } from './schema';
+import { createSecretStore } from './secretStore';
 
 export type { AppConfig, Env } from './schema';
 
@@ -97,9 +98,28 @@ export function ensureDataDirs(): void {
 
 let cachedEnv: Env | null = null;
 
+/**
+ * Owner-only, for everything Nexa writes.
+ *
+ * The parent directory is already 0700, which keeps other accounts out. These
+ * modes matter for what escapes it: a Time Machine restore, a folder synced to
+ * cloud storage, a support bundle someone zips up. Mail subjects, screenshots
+ * of login pages and a browser profile with live cookies should not become
+ * world-readable the moment they are copied.
+ */
+export const OWNER_ONLY_FILE = 0o600;
+export const OWNER_ONLY_DIR = 0o700;
+
 export function loadEnv(): Env {
   if (cachedEnv) return cachedEnv;
+
+  // Encrypted secrets first, then the plaintext file. dotenv still runs so a
+  // .env written by hand keeps working, and so does the shell environment.
   dotenv.config({ path: paths.env });
+  for (const [key, value] of Object.entries(createSecretStore(paths.env).read())) {
+    if (!process.env[key]) process.env[key] = value;
+  }
+
   const parsed = EnvSchema.safeParse(process.env);
   if (!parsed.success) {
     throw new Error(`Invalid environment:\n${formatZodError(parsed.error.issues)}`);
@@ -114,32 +134,21 @@ export function reloadEnv(): Env {
 }
 
 /**
- * Writes secrets to the .env file, preserving other keys and comments.
- * Owner-only permissions; values are never logged or echoed back to the UI.
+ * Stores secrets, encrypted by the OS keychain when one is available.
+ *
+ * Writing through the store is what migrates an existing plaintext .env: it
+ * merges the old values in, writes the encrypted file, and deletes the
+ * readable one. Values are never logged or echoed back to the UI.
  */
 export function writeEnvValues(values: Record<string, string>): void {
-  const file = paths.env;
-  const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-  const lines = existing ? existing.split(/\r?\n/) : [];
-  const remaining = new Map(Object.entries(values));
-
-  const updated = lines.map((line) => {
-    const match = line.match(/^\s*([A-Z0-9_]+)\s*=/);
-    if (!match) return line;
-    const key = match[1] as string;
-    if (!remaining.has(key)) return line;
-    const value = remaining.get(key) as string;
-    remaining.delete(key);
-    return `${key}=${value}`;
-  });
-
-  for (const [key, value] of remaining) updated.push(`${key}=${value}`);
-
-  const body = `${updated.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()}\n`;
-  fs.writeFileSync(file, body, { encoding: 'utf8', mode: 0o600 });
-
+  createSecretStore(paths.env).write(values);
   for (const [key, value] of Object.entries(values)) process.env[key] = value;
   reloadEnv();
+}
+
+/** Whether secrets are currently encrypted at rest. Reported by doctor. */
+export function secretsEncrypted(): boolean {
+  return createSecretStore(paths.env).encrypted;
 }
 
 let cachedConfig: AppConfig | null = null;
@@ -152,6 +161,7 @@ export function loadConfig(force = false): AppConfig {
   if (!fs.existsSync(paths.config) && fs.existsSync(paths.configExample)) {
     try {
       fs.copyFileSync(paths.configExample, paths.config);
+      fs.chmodSync(paths.config, OWNER_ONLY_FILE);
     } catch {
       // Not fatal: every field in the schema has a default.
     }
@@ -178,7 +188,14 @@ export function loadConfig(force = false): AppConfig {
 export function saveConfig(next: AppConfig): AppConfig {
   const parsed = AppConfigSchema.parse(next);
   ensureDataDirs();
-  fs.writeFileSync(paths.config, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(paths.config, `${JSON.stringify(parsed, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: OWNER_ONLY_FILE,
+  });
+  // `mode` above only applies when the file is created. Writing over an
+  // existing config keeps whatever permissions it already had, so an install
+  // that predates this would stay world-readable forever. chmod every time.
+  fs.chmodSync(paths.config, OWNER_ONLY_FILE);
   cachedConfig = parsed;
   return parsed;
 }

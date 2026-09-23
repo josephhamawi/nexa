@@ -53,7 +53,35 @@ export class AnalysisTool implements Tool<Input> {
   async execute(input: Input, context: ToolContext): Promise<ToolResult> {
     const material = collectMaterial(context.task, input.fromStep);
     if (material.length === 0) {
-      return { ok: false, summary: 'Nothing to analyse: no earlier step produced material', error: 'no input material' };
+      // An earlier step that ran and found nothing is an answer, not a crash.
+      // "Summarize today's mail" on a day with no mail failed the whole task
+      // with "no input material", when the honest report was "none arrived".
+      const ran = context.task.steps.filter(
+        (step) => step.status === 'DONE' && step.id !== context.step.id,
+      );
+
+      if (ran.length === 0) {
+        return {
+          ok: false,
+          summary: 'Nothing to analyse: no earlier step produced material',
+          error: 'no input material',
+        };
+      }
+
+      // Carry the upstream wording through: it knows what was looked at and
+      // came up empty ("No mail today in joseph@..."), which is exactly what
+      // the person asked about.
+      const upstream = ran
+        .map((step) => step.summary)
+        .filter((line): line is string => Boolean(line && line.trim()))
+        .slice(-2);
+
+      context.report('Nothing came back to analyse');
+      return {
+        ok: true,
+        summary: upstream.length > 0 ? upstream.join(' ') : 'There was nothing to report.',
+        data: { items: [], method: 'empty', empty: true },
+      };
     }
 
     context.report(`Analyzing ${material.length} items`);
@@ -177,7 +205,10 @@ interface MaterialItem {
 }
 
 /** Pulls usable material out of whatever earlier steps produced. */
-function collectMaterial(task: { steps: { id: string; status: string; output?: unknown }[] }, fromStep?: string): MaterialItem[] {
+function collectMaterial(
+  task: { steps: { id: string; status: string; output?: unknown; summary?: string | null }[] },
+  fromStep?: string,
+): MaterialItem[] {
   const steps = fromStep
     ? task.steps.filter((step) => step.id === fromStep)
     : task.steps.filter((step) => step.status === 'DONE');
@@ -201,7 +232,9 @@ function collectMaterial(task: { steps: { id: string; status: string; output?: u
         else if (item && typeof item === 'object') {
           const record = item as Record<string, unknown>;
           material.push({
-            title: String(record.title ?? record.name ?? 'Item'),
+            // `subject` is how mail names itself; without it every message in
+            // a mail summary was headed "Item".
+            title: String(record.title ?? record.name ?? record.subject ?? 'Item'),
             url: typeof record.url === 'string' ? record.url : undefined,
             text: JSON.stringify(record).slice(0, 2000),
           });

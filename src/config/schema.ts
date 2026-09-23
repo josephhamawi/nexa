@@ -15,6 +15,14 @@ export const LlmConfigSchema = z.object({
   model: z.string().default('claude-sonnet-5'),
   /** Upper bound on a single completion, to keep costs predictable. */
   maxOutputTokens: z.number().int().min(256).max(32_000).default(4096),
+  /**
+   * How hard the model works on a request.
+   *
+   * Replaces `temperature` for Anthropic, which rejects sampling parameters on
+   * every current model. Still sent to OpenAI-compatible servers, which accept
+   * it. "medium" balances cost against the quality of a plan.
+   */
+  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
   temperature: z.number().min(0).max(1).default(0.2),
   /** Base URL for OpenAI-compatible servers (Ollama, vLLM, LM Studio, …). */
   baseUrl: z.string().default(''),
@@ -54,10 +62,16 @@ export const McpServerSchema = z.object({
   /** Extra environment for the server process, e.g. an API token. */
   env: z.record(z.string()).default({}),
   permissions: z
-    .array(z.enum(['READ', 'RESEARCH', 'BROWSER', 'FILES', 'EXECUTE', 'NOTIFY']))
+    .array(z.enum(['READ', 'RESEARCH', 'BROWSER', 'FILES', 'EXECUTE', 'NOTIFY', 'CALENDAR', 'NOTES', 'MAIL', 'MAIL_READ']))
     .default(['READ']),
   /** Seconds before a call to this server is abandoned. */
   timeoutSeconds: z.number().int().min(5).max(300).default(45),
+  /**
+   * What this server is for and what it needs. Kept in the schema rather than
+   * as a stray key so the shipped guidance survives the first Save settings,
+   * which rewrites config.json through this parser.
+   */
+  note: z.string().default(''),
 });
 
 export const AgentConfigSchema = z.object({
@@ -105,11 +119,77 @@ export const NotificationsConfigSchema = z.object({
   dailyBriefAt: z.union([z.literal(''), timeOfDay]).default(''),
 });
 
+export const CalendarConfigSchema = z.object({
+  /** Off by default: writing to someone's calendar is opt-in, not a surprise. */
+  enabled: z.boolean().default(false),
+  /** Calendar.app calendar that events land in when a task does not name one. */
+  defaultCalendar: z.string().trim().default(''),
+});
+
+export const NotesConfigSchema = z.object({
+  /** Off by default: writing into someone's notes is opt-in. */
+  enabled: z.boolean().default(false),
+  /** Notes folder new notes land in when a task does not name one. */
+  defaultFolder: z.string().trim().default('Notes'),
+});
+
+export const MailConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  /**
+   * Sending is a second, separate switch on purpose. Drafting is recoverable
+   * and sending is not, so turning mail on must not quietly mean "may email
+   * people as me".
+   */
+  allowSend: z.boolean().default(false),
+  /** Account used when a request does not name one. Empty reads them all. */
+  defaultAccount: z.string().trim().default(''),
+  /**
+   * Accounts last detected from Mail, cached so the planner and the clarifier
+   * can name them without paying an Apple event on every request.
+   */
+  accounts: z.array(z.string()).default([]),
+});
+
+/**
+ * Running commands and driving other apps.
+ *
+ * Both are off by default and both are allow-listed. Nexa reads email and web
+ * pages -- text an attacker can write -- so a tool that runs whatever it is
+ * handed is the difference between a bad summary and a compromised machine.
+ * The allow-list is the boundary; the approval prompt is the second one.
+ */
+export const ShellConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  /**
+   * Programs Nexa may run, by name. Empty means nothing runs, which is the
+   * point: this is opt-in per command, never "anything on PATH".
+   */
+  allowedCommands: z.array(z.string()).default([]),
+  /** Commands run here. Empty uses your home directory. */
+  workingDirectory: z.string().default(''),
+  timeoutSeconds: z.number().int().min(1).max(600).default(60),
+});
+
+export const AppControlConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** Apps Nexa may drive, by name as they appear in the Applications folder. */
+  allowedApps: z.array(z.string()).default([]),
+});
+
+export const AutomationConfigSchema = z.object({
+  shell: ShellConfigSchema.default({}),
+  apps: AppControlConfigSchema.default({}),
+});
+
 export const AppConfigSchema = z.object({
   llm: LlmConfigSchema.default({}),
   telegram: TelegramConfigSchema.default({}),
   agent: AgentConfigSchema.default({}),
   files: FilesConfigSchema.default({}),
+  calendar: CalendarConfigSchema.default({}),
+  notes: NotesConfigSchema.default({}),
+  mail: MailConfigSchema.default({}),
+  automation: AutomationConfigSchema.default({}),
   notifications: NotificationsConfigSchema.default({}),
   userProfile: UserProfileSchema.default({}),
   mcpServers: z.array(McpServerSchema).default([]),
@@ -126,12 +206,19 @@ export const AppConfigSchema = z.object({
 });
 
 export type LlmConfig = z.infer<typeof LlmConfigSchema>;
+export type Effort = LlmConfig['effort'];
 export type TelegramConfig = z.infer<typeof TelegramConfigSchema>;
 export type BrowserProfile = z.infer<typeof BrowserProfileSchema>;
 export type McpServerConfig = z.infer<typeof McpServerSchema>;
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 export type UserProfile = z.infer<typeof UserProfileSchema>;
 export type FilesConfig = z.infer<typeof FilesConfigSchema>;
+export type CalendarConfig = z.infer<typeof CalendarConfigSchema>;
+export type NotesConfig = z.infer<typeof NotesConfigSchema>;
+export type MailConfig = z.infer<typeof MailConfigSchema>;
+export type ShellConfig = z.infer<typeof ShellConfigSchema>;
+export type AppControlConfig = z.infer<typeof AppControlConfigSchema>;
+export type AutomationConfig = z.infer<typeof AutomationConfigSchema>;
 export type NotificationsConfig = z.infer<typeof NotificationsConfigSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 

@@ -12,8 +12,10 @@ import {
   loadConfig,
   loadEnv,
   paths,
+  secretsEncrypted,
 } from '../config/config';
 import { NotificationManager } from '../notifications/NotificationManager';
+import { createLlmProvider } from '../llm/providers';
 import { JsonStore } from '../storage/JsonStore';
 import type { Task } from '../tasks/Task';
 import type { Watcher } from '../watchers/Watcher';
@@ -48,6 +50,19 @@ async function main(): Promise<void> {
       : `${config.llm.provider} configured but no key; Nexa will plan with rules`,
   );
 
+  // A key that is present but rejected is the failure worth catching here: it
+  // looks identical to a working setup everywhere else, and Nexa silently
+  // plans with rules instead.
+  if (llmReady) {
+    const provider = createLlmProvider(config, env);
+    try {
+      await provider.complete({ maxOutputTokens: 16, messages: [{ role: 'user', content: 'Say OK.' }] });
+      line('AI provider call', OK, 'the model answered a test request');
+    } catch (err) {
+      line('AI provider call', BAD, `the model rejected a test request: ${(err as Error).message.slice(0, 180)}`);
+    }
+  }
+
   const telegramReady = hasTelegramCredentials(env);
   line('Telegram', telegramReady ? OK : WARN, telegramReady ? 'credentials present' : 'not configured, remote control is off');
 
@@ -68,6 +83,69 @@ async function main(): Promise<void> {
     config.files.allowedDirectories.length > 0
       ? `${config.files.allowedDirectories.length} folder(s) allowed`
       : 'no folders allowed, file tasks are disabled',
+  );
+
+  line(
+    'Calendar',
+    config.calendar.enabled ? OK : WARN,
+    config.calendar.enabled
+      ? `on, writing to "${config.calendar.defaultCalendar || 'no default set'}"`
+      : 'off, calendar requests are declined',
+  );
+
+  line(
+    'Notes',
+    config.notes.enabled ? OK : WARN,
+    config.notes.enabled ? `on, saving to "${config.notes.defaultFolder}"` : 'off, note requests are declined',
+  );
+
+  line(
+    'Mail',
+    config.mail.enabled ? OK : WARN,
+    config.mail.enabled
+      ? config.mail.allowSend
+        ? 'on, reads the inbox and allowed to SEND as you'
+        : 'on, reads the inbox, drafts only'
+      : 'off, mail requests are declined',
+  );
+
+  const shell = config.automation.shell;
+  line(
+    'Run commands',
+    shell.enabled ? (shell.allowedCommands.length > 0 ? OK : WARN) : OK,
+    shell.enabled
+      ? shell.allowedCommands.length > 0
+        ? `on, allowed: ${shell.allowedCommands.join(', ')}`
+        : 'on, but no commands are allowed so nothing can run'
+      : 'off',
+  );
+
+  const apps = config.automation.apps;
+  line(
+    'Control other apps',
+    apps.enabled ? (apps.allowedApps.length > 0 ? OK : WARN) : OK,
+    apps.enabled
+      ? apps.allowedApps.length > 0
+        ? `on, allowed: ${apps.allowedApps.join(', ')}`
+        : 'on, but no apps are allowed so nothing can be driven'
+      : 'off',
+  );
+
+  const enabledServers = config.mcpServers.filter((server) => server.enabled);
+  line(
+    'MCP servers',
+    OK,
+    enabledServers.length > 0
+      ? `${enabledServers.length} enabled: ${enabledServers.map((server) => server.id).join(', ')}`
+      : `none enabled (${config.mcpServers.length} in the catalogue)`,
+  );
+
+  line(
+    'Secrets at rest',
+    secretsEncrypted() ? OK : WARN,
+    secretsEncrypted()
+      ? 'encrypted with the OS keychain'
+      : `plaintext in ${paths.env} (owner-only). The desktop app encrypts them; this CLI cannot.`,
   );
 
   line('Demo mode', config.agent.demoMode ? WARN : OK, config.agent.demoMode ? 'ON, results are simulated' : 'off');

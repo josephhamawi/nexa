@@ -42,6 +42,8 @@ const api = {
   detectChat: (botToken: string) => ipcRenderer.invoke('secrets:detectChat', { botToken }),
   saveLlm: (values: { provider: string; apiKey: string; baseUrl?: string }) =>
     ipcRenderer.invoke('secrets:saveLlm', values),
+  copyText: (text: string) => ipcRenderer.invoke('clipboard:write', text),
+  detectMailAccounts: () => ipcRenderer.invoke('mail:detectAccounts'),
   testNotifications: () => ipcRenderer.invoke('notifications:test'),
   setWindowMode: (mode: 'compact' | 'normal' | 'maximized') =>
     ipcRenderer.invoke('window:setMode', mode),

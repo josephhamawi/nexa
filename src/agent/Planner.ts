@@ -48,6 +48,95 @@ export interface PlanContext {
 }
 
 /**
+ * What would have to be registered for a refused capability to become possible.
+ *
+ * The guard below is deliberately not "is there any tool at all" -- it matches
+ * the capability against tool names, so adding a calendar tool unlocks calendar
+ * requests and nothing else. A segment match (`calendar`, `mcp_gcal_add_event`)
+ * rather than a substring one keeps `eventbrite_search` from looking like a way
+ * to book a meeting.
+ *
+ * `null` means the refusal is policy, not a missing tool: Nexa does not spend
+ * your money or submit applications as you, however it is configured.
+ *
+ * `acts` separates the two kinds of capability. Most of these are about
+ * changing something, so a read-only tool must never unlock them -- that is
+ * what stops `eventbrite_search` from looking like a way to book a meeting.
+ * Reading a mailbox is the opposite: the tool that satisfies it is read-only
+ * by design, and requiring a mutating one would refuse it forever.
+ */
+interface Capability {
+  pattern: RegExp;
+  /** True when only a tool that changes something can satisfy this. */
+  acts: boolean;
+}
+
+const CAPABILITY_TOOLS: Record<string, Capability | null> = {
+  calendar: { pattern: segment('calendar|calendars|event|events|reminder|reminders|appointment'), acts: true },
+  notes: { pattern: segment('note|notes|notepad|memo'), acts: true },
+  messaging: { pattern: segment('email|mail|gmail|message|messages|sms|whatsapp|slack|imessage'), acts: true },
+  'reading mail': {
+    pattern: segment('mail_read|read_mail|inbox|mailbox|messages|list_messages|gmail'),
+    acts: false,
+  },
+  'social posting': { pattern: segment('post|posts|tweet|social|linkedin|mastodon|bluesky'), acts: true },
+  'writing files': { pattern: segment('write|write_file|create_file|edit_file|files_write'), acts: true },
+  purchasing: null,
+  'form submission': null,
+};
+
+/**
+ * A reference to the user's own mailbox, as opposed to email in general.
+ *
+ * Deliberately requires the possessive: "my inbox" is a request Nexa can only
+ * answer by opening Mail, while "the best email client" is a research question
+ * that must stay one.
+ */
+const OWN_MAILBOX = /\b(my|our)\s+(inbox|mailbox|mail|e-?mails?|e-?mail)\b|\bthe\s+(inbox|mailbox)\b/;
+
+/**
+ * Asking what has arrived, without naming the mailbox.
+ *
+ * "any new emails?" has no possessive but can only mean one thing. Anchored on
+ * arrival words so that "compare email marketing tools" stays a research
+ * question rather than becoming an inbox request.
+ */
+const MAIL_ARRIVED = /\b(any|new|unread|latest|recent)\s+(new\s+)?(mail|mails|e-?mails?|messages)\b/;
+
+function localZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+function segment(words: string): RegExp {
+  return new RegExp(`(^|[_.])(${words})([_.]|$)`);
+}
+
+/** Registered tools that could satisfy a capability. */
+export function toolsForCapability(capability: string, tools: ToolRegistry): string[] {
+  const entry = CAPABILITY_TOOLS[capability];
+  if (!entry) return [];
+
+  return tools
+    .list()
+    .filter((tool) => (entry.acts ? tool.mutating : true) && entry.pattern.test(tool.name.toLowerCase()))
+    .map((tool) => tool.name);
+}
+
+function unsupportedPlan(request: string, unsupported: UnsupportedIntent): Plan {
+  return {
+    name: 'Unsupported request',
+    description: request,
+    type: TaskType.CONTROL,
+    steps: [],
+    permissions: [Permission.READ],
+    recurrence: { kind: 'once' },
+    approvalRequired: false,
+    method: 'rules',
+    unsupported,
+  };
+}
+
+/**
  * Turns a sentence into an executable plan.
  *
  * Two paths on purpose. With a model configured the planner is flexible and
@@ -56,7 +145,17 @@ export interface PlanContext {
  * Nexa is still genuinely useful before you add an API key.
  */
 export class Planner {
-  constructor(private readonly llm: LlmProvider) {}
+  constructor(
+    private readonly llm: LlmProvider,
+    /**
+     * Told when the model was configured but could not be used.
+     *
+     * Without this the failure only reached a log file: Nexa quietly planned
+     * with keyword rules, the confidence bar read "no model", and someone with
+     * a perfectly good API key had no way to know their requests were 400ing.
+     */
+    private readonly onModelFailure: (reason: string) => void = () => undefined,
+  ) {}
 
   /** Commands about Nexa itself, recognised before any planning happens. */
   detectControl(text: string): ControlIntent | null {
@@ -95,20 +194,33 @@ export class Planner {
   detectUnsupported(text: string): UnsupportedIntent | null {
     const lower = text.trim().toLowerCase();
 
+    // Checked before the research escape hatch below, because "what new mail do
+    // I have" reads like a question and no amount of web searching can answer
+    // it. Without this, "check my mail" came back as a Google result for Gmail,
+    // marked COMPLETED.
+    const aboutWriting = /\b(send|draft|reply|compose|forward|write)\b/.test(lower);
+    if (!aboutWriting && (OWN_MAILBOX.test(lower) || MAIL_ARRIVED.test(lower))) {
+      return { capability: 'reading mail', request: text.trim() };
+    }
+
     // An explicit research framing wins: the user wants information, not action.
     if (/^(research|find out|look up|compare|summari[sz]e|what|which|who|when|where|why|how)\b/.test(lower)) {
       return null;
     }
     if (/\b(research|find me|search for|look up|tell me about)\b/.test(lower)) return null;
 
+    // Each capability here must have an entry in CAPABILITY_TOOLS, which decides
+    // whether a registered tool can lift the refusal.
     const capabilities: { pattern: RegExp; capability: string }[] = [
       { pattern: /\b(add|put|create|schedule|book)\b[^.]{0,40}\b(calendar|meeting|event|appointment|reminder)\b/, capability: 'calendar' },
       { pattern: /\b(calendar|reminder)\b[^.]{0,30}\b(add|create|set)\b/, capability: 'calendar' },
-      { pattern: /\bsend\b[^.]{0,30}\b(email|mail|message|text|whatsapp|sms|dm)\b/, capability: 'messaging' },
+      { pattern: /\b(send|draft|compose|forward)\b[^.]{0,30}\b(email|mail|message|text|whatsapp|sms|dm)\b/, capability: 'messaging' },
+      { pattern: /\breply\b[^.]{0,30}\b(to|email|mail|message)\b/, capability: 'messaging' },
       { pattern: /\b(email|message|text|whatsapp|call|ring|phone)\s+(him|her|them|someone|[a-z]+@)/, capability: 'messaging' },
       { pattern: /\b(buy|purchase|order|pay for|subscribe to|book a (flight|hotel|table|room|ticket))\b/, capability: 'purchasing' },
       { pattern: /\bpost\b[^.]{0,30}\b(twitter|x|linkedin|instagram|facebook|reddit|tiktok)\b/, capability: 'social posting' },
       { pattern: /\b(apply|submit)\b[^.]{0,30}\b(application|form|job|cv|resume)\b/, capability: 'form submission' },
+      { pattern: /\b(save|add|write|put|make|create|jot|keep)\b[^.]{0,30}\b(note|notes)\b/, capability: 'notes' },
       { pattern: /\b(delete|remove|rename|move|write|edit|save)\b[^.]{0,20}\b(file|folder|document)\b/, capability: 'writing files' },
     ];
 
@@ -136,26 +248,41 @@ export class Planner {
 
     const unsupported = this.detectUnsupported(request);
     if (unsupported) {
-      return {
-        name: 'Unsupported request',
-        description: request,
-        type: TaskType.CONTROL,
-        steps: [],
-        permissions: [Permission.READ],
-        recurrence: { kind: 'once' },
-        approvalRequired: false,
-        method: 'rules',
-        unsupported,
-      };
+      const enabling = toolsForCapability(unsupported.capability, context.tools);
+
+      // Nothing registered can do it, so the honest answer is still no.
+      if (enabling.length === 0) return unsupportedPlan(request, unsupported);
+
+      const plan = await this.producePlan(request, context);
+
+      // A tool existing is not proof the plan uses it. Without this check a
+      // request to book a meeting could come back as a web search marked
+      // COMPLETED, which is exactly the failure the guard exists to prevent.
+      if (!plan.steps.some((step) => enabling.includes(step.tool))) {
+        log.warn(
+          { capability: unsupported.capability, enabling },
+          'a tool for this capability exists but the plan did not use it; declining',
+        );
+        return unsupportedPlan(request, unsupported);
+      }
+
+      return plan;
     }
 
+    return this.producePlan(request, context);
+  }
+
+  /** Model first, rules when there is no model or the model produced junk. */
+  private async producePlan(request: string, context: PlanContext): Promise<Plan> {
     if (this.llm.available) {
       try {
         const plan = await this.planWithModel(request, context);
         if (plan) return plan;
         log.warn('model returned an unusable plan, falling back to rules');
       } catch (err) {
-        log.warn({ err: (err as Error).message }, 'model planning failed, falling back to rules');
+        const reason = (err as Error).message;
+        log.warn({ err: reason }, 'model planning failed, falling back to rules');
+        this.onModelFailure(reason);
       }
     }
 
@@ -189,11 +316,21 @@ export class Planner {
             '- A request to keep an eye on something is type WATCH with a single "watcher" step.',
             '- Set approvalRequired true only if a step would submit data, buy, post or change something.',
             '- Never invent tools or URLs. If no URL was given, do not fabricate one.',
+            '- Resolve relative times ("tomorrow at 3", "next Friday") into absolute ISO 8601 timestamps',
+            '  with a timezone offset. Tools take instants, never phrases. The current time is given',
+            '  with each request.',
           ].join('\n'),
         },
         {
           role: 'user',
+          // The clock lives here, not in the system prompt.
+          //
+          // Prompt caching is a prefix match, so a timestamp anywhere in the
+          // system block changes its bytes on every call and nothing is ever
+          // cached. Keeping the ~1.2k-token catalogue byte-identical is what
+          // makes it cacheable; the volatile part goes after it.
           content:
+            `Now: ${new Date().toISOString()} (local zone ${localZone()})\n\n` +
             `Request: ${request}\n\n` +
             `User profile (use it when the request is about their career or interests):\n` +
             JSON.stringify(

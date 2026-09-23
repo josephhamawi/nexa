@@ -1213,3 +1213,120 @@ body[data-mode='compact'] .hud {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Result dialog
+
+   The card shows a clipped preview because a list of twenty tasks each with a
+   full report is unreadable. This is where the whole thing lives.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.result-dialog {
+  width: min(880px, calc(100vw - 48px));
+  max-height: min(78vh, 820px);
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.result-dialog::backdrop {
+  background: rgba(18, 21, 26, 0.45);
+}
+
+.result-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.result-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.result-dialog-head h2 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.result-dialog-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.result-dialog-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.result-dialog-body:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.result-dialog-evidence {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+  white-space: normal;
+}
+
+.result-dialog-evidence h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.result-dialog-evidence-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.result-dialog-evidence-row:last-child {
+  border-bottom: 0;
+}
+
+.result-dialog-evidence-row span {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.result-dialog-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--rule);
+  background: var(--surface-2);
+}
+
+/* The clipped preview is the affordance that there is more to read. */
+.record-result.clickable {
+  cursor: pointer;
+}
+
+.record-result.clickable:hover {
+  border-left-color: var(--accent);
+}

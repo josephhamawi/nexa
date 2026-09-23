@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { Planner, extractUrl, parseRecurrence, extractTimeOfDay, hostOf } from '../src/agent/Planner';
+import { z } from 'zod';
+import { Planner, toolsForCapability, extractUrl, parseRecurrence, extractTimeOfDay, hostOf } from '../src/agent/Planner';
+import { CalendarTool } from '../src/tools/CalendarTool';
+import { NotesTool } from '../src/tools/NotesTool';
+import { MailTool } from '../src/tools/MailTool';
+import { MailReadTool } from '../src/tools/MailReadTool';
+import { Permission } from '../src/tasks/Task';
 import { NullProvider } from '../src/llm/providers';
 import { ToolRegistry } from '../src/tools/Tool';
 import { WatcherTool } from '../src/tools/WatcherTool';
@@ -178,5 +184,161 @@ describe('capability honesty', () => {
   it('leaves supported work alone', () => {
     expect(planner.detectUnsupported('watch https://example.com for changes')).toBeNull();
     expect(planner.detectUnsupported('research AI agent frameworks')).toBeNull();
+  });
+});
+
+/** A model that always answers with the same canned plan. */
+class ScriptedProvider {
+  readonly name = 'scripted';
+  readonly model = 'scripted';
+  readonly available = true;
+  constructor(private readonly reply: string) {}
+  async complete(): Promise<{ text: string; model: string }> {
+    return { text: this.reply, model: this.model };
+  }
+}
+
+function withCalendar() {
+  const base = context();
+  base.tools.register(new CalendarTool(() => ({ enabled: true, defaultCalendar: 'Home' }), async () => 'created:x'));
+  return base;
+}
+
+describe('capability gate', () => {
+  const ask = 'add a dentist appointment to my calendar on friday at 3';
+
+  it('refuses a calendar request while nothing can do it', async () => {
+    const plan = await planner.plan(ask, context());
+    expect(plan.unsupported?.capability).toBe('calendar');
+    expect(plan.steps).toHaveLength(0);
+  });
+
+  it('lets the request through once a calendar tool is registered and used', async () => {
+    const model = new Planner(
+      new ScriptedProvider(
+        JSON.stringify({
+          name: 'Dentist',
+          description: 'book the dentist',
+          type: 'REPORT',
+          recurrence: { kind: 'once' },
+          approvalRequired: true,
+          steps: [
+            {
+              tool: 'calendar',
+              description: 'Create the event',
+              input: { operation: 'create', title: 'Dentist', startsAt: '2026-09-25T15:00:00+03:00' },
+            },
+          ],
+        }),
+      ) as never,
+    );
+
+    const plan = await model.plan(ask, withCalendar());
+    expect(plan.unsupported).toBeUndefined();
+    expect(plan.steps.map((step) => step.tool)).toEqual(['calendar']);
+    expect(plan.permissions).toContain(Permission.CALENDAR);
+  });
+
+  it('still refuses when a calendar tool exists but the plan quietly substitutes a web search', async () => {
+    // The rule-based planner has no calendar shape, so it falls back to
+    // research. Returning that as a completed task is the failure the gate
+    // exists to prevent, so the refusal must survive the tool being present.
+    const plan = await planner.plan(ask, withCalendar());
+    expect(plan.unsupported?.capability).toBe('calendar');
+    expect(plan.steps).toHaveLength(0);
+  });
+
+  it('keeps refusing to spend money however Nexa is configured', () => {
+    const tools = withCalendar().tools;
+    expect(toolsForCapability('purchasing', tools)).toEqual([]);
+    expect(toolsForCapability('form submission', tools)).toEqual([]);
+  });
+
+  it('only counts tools that actually act', () => {
+    const tools = withCalendar().tools;
+    expect(toolsForCapability('calendar', tools)).toEqual(['calendar']);
+    // web_research mentions searching, not acting, and must never unlock one.
+    expect(toolsForCapability('messaging', tools)).toEqual([]);
+  });
+
+  it('detects a request to save a note', () => {
+    expect(planner.detectUnsupported('save a note with the shortlist')?.capability).toBe('notes');
+    expect(planner.detectUnsupported('jot down a note about the meeting')?.capability).toBe('notes');
+    // A question about notes is still a question.
+    expect(planner.detectUnsupported('what notes do I have')).toBeNull();
+  });
+
+  it('unlocks notes and messaging from the tools that actually do them', () => {
+    const tools = withCalendar().tools;
+    expect(toolsForCapability('notes', tools)).toEqual([]);
+    expect(toolsForCapability('messaging', tools)).toEqual([]);
+
+    tools.register(new NotesTool(() => ({ enabled: true, defaultFolder: 'Notes' }), async () => 'created:x'));
+    tools.register(new MailTool(() => ({ enabled: true, allowSend: false }), async () => 'drafted:x'));
+
+    expect(toolsForCapability('notes', tools)).toEqual(['notes']);
+    expect(toolsForCapability('messaging', tools)).toEqual(['mail']);
+    // Adding mail must not quietly make Nexa willing to buy things.
+    expect(toolsForCapability('purchasing', tools)).toEqual([]);
+  });
+
+  it('refuses to answer "check my mail" with a web search', async () => {
+    // Regression: this exact request came back COMPLETED, containing a Google
+    // result for Gmail. A search can never answer what is in someone's inbox.
+    expect(planner.detectUnsupported('check my mail for new mails today')?.capability).toBe('reading mail');
+
+    const plan = await planner.plan('check my mail for new mails today', context());
+    expect(plan.unsupported?.capability).toBe('reading mail');
+    expect(plan.steps).toHaveLength(0);
+  });
+
+  it('spots the other ways of asking what arrived', () => {
+    for (const ask of [
+      'any new emails?',
+      'read my inbox',
+      'what is in my mailbox',
+      'go through my email and tell me what matters',
+      'anything unread in my mail',
+    ]) {
+      expect(planner.detectUnsupported(ask)?.capability).toBe('reading mail');
+    }
+  });
+
+  it('leaves email as a research topic alone', () => {
+    expect(planner.detectUnsupported('research the best email client')).toBeNull();
+    expect(planner.detectUnsupported('compare email marketing tools')).toBeNull();
+    expect(planner.detectUnsupported('find me articles about inbox zero')).toBeNull();
+  });
+
+  it('still treats writing mail as writing, not reading', () => {
+    expect(planner.detectUnsupported('send an email to my accountant')?.capability).toBe('messaging');
+    expect(planner.detectUnsupported('draft a reply to my email from Dana')?.capability).toBe('messaging');
+  });
+
+  it('unlocks reading mail from the read-only tool, which acting never could', () => {
+    const tools = withCalendar().tools;
+    expect(toolsForCapability('reading mail', tools)).toEqual([]);
+
+    // The writing tool alone must not make Nexa claim it can read an inbox.
+    tools.register(new MailTool(() => ({ enabled: true, allowSend: false }), async () => 'drafted:x'));
+    expect(toolsForCapability('reading mail', tools)).toEqual([]);
+
+    tools.register(new MailReadTool(() => ({ enabled: true, allowSend: false }), async () => ''));
+    expect(toolsForCapability('reading mail', tools)).toEqual(['mail_read']);
+    // ...and reading must not unlock sending.
+    expect(toolsForCapability('messaging', tools)).toEqual(['mail']);
+  });
+
+  it('does not mistake a read-only tool whose name merely mentions events', () => {
+    const tools = withCalendar().tools;
+    tools.register({
+      name: 'eventbrite_search',
+      description: 'search events',
+      inputSchema: z.object({}),
+      permissions: [Permission.RESEARCH],
+      mutating: false,
+      execute: async () => ({ ok: true, summary: '' }),
+    } as never);
+    expect(toolsForCapability('calendar', tools)).toEqual(['calendar']);
   });
 });

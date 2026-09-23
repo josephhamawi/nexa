@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Page } from 'playwright';
-import { ensureDataDirs, paths } from '../config/config';
+import { ensureDataDirs, paths , OWNER_ONLY_FILE } from '../config/config';
 import { fileTimestamp } from '../utils/time';
 import { childLogger } from '../logging/logger';
 import type { Evidence } from '../tasks/Task';
@@ -30,6 +30,10 @@ export class EvidenceStore {
     const file = path.join(this.directoryFor(taskId), `${fileTimestamp()}_${safe(label)}.png`);
     try {
       await page.screenshot({ path: file, fullPage: true });
+      // Playwright writes with the default umask. A screenshot of a page the
+      // user was asked to log in to is among the most sensitive things Nexa
+      // stores, so it does not stay world-readable.
+      fs.chmodSync(file, OWNER_ONLY_FILE);
       log.debug({ taskId, file: path.basename(file) }, 'screenshot captured');
       return file;
     } catch (err) {
@@ -42,7 +46,10 @@ export class EvidenceStore {
   savePayload(taskId: string, label: string, data: unknown): string | null {
     const file = path.join(this.directoryFor(taskId), `${fileTimestamp()}_${safe(label)}.json`);
     try {
-      fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+      fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, {
+        encoding: 'utf8',
+        mode: OWNER_ONLY_FILE,
+      });
       return file;
     } catch (err) {
       log.warn({ taskId, err: (err as Error).message }, 'could not save payload');

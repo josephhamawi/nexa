@@ -72,13 +72,15 @@ find 5 remote AI engineering jobs that match my profile
 Nexa shows you the plan before it starts, and reports with the URLs,
 timestamps and screenshots it actually used.
 
-![A planned task](screenshots/03-task-planned.png)
+![Tasks, with their plan and progress](screenshots/02-tasks.png)
 
-**It will tell you when it cannot do something.** This matters more than it
-sounds: an agent that quietly substitutes a web search for the thing you asked
-for looks like it is working.
+Anything that changes something outside Nexa waits for you first.
 
-![An honest refusal](screenshots/05-honest-refusal.png)
+![Approvals](screenshots/05-approvals.png)
+
+**It will also tell you when it cannot do something at all**, rather than
+quietly substituting a web search for the thing you asked for — which looks
+exactly like it is working.
 
 ---
 
@@ -87,7 +89,7 @@ for looks like it is working.
 Everything that reaches outside Nexa is off until you switch it on, in
 **Settings → Agent behaviour**.
 
-![Settings](screenshots/04-settings.png)
+![Settings](screenshots/06-settings.png)
 
 | Switch | What it allows | Notes |
 |---|---|---|

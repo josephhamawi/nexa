@@ -29,7 +29,8 @@
     "icon": "node scripts/make-icon.mjs",
     "package": "npm run build && electron-builder --mac --publish never",
     "postinstall": "playwright install chromium",
-    "e2e": "npm run build && tsx e2e/drive.ts"
+    "e2e": "npm run build && tsx e2e/drive.ts",
+    "screenshots": "npm run build && tsx e2e/screenshots.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

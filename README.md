@@ -33,6 +33,18 @@ macOS · runs entirely on your machine · MIT licensed
 
 ---
 
+## See it work
+
+| | |
+|---|---|
+| **Everything at a glance** — what is running, what needs you, what changed | ![Overview](docs/screenshots/01-overview.png) |
+| **Every result, in full** — with the evidence and a confidence score | ![A result](docs/screenshots/03-result.png) |
+| **Watchers** — pages and searches checked on a schedule, reporting only meaningful change | ![Watchers](docs/screenshots/04-watchers.png) |
+| **Nothing consequential without you** — anything that changes the world outside Nexa waits | ![Approvals](docs/screenshots/05-approvals.png) |
+| **Off until you say so** — every capability, and the allow-lists that bound it | ![Settings](docs/screenshots/06-settings.png) |
+
+---
+
 ## What it does
 
 - **Understands a request** in plain language, from the desktop app or Telegram.

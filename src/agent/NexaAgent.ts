@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { Planner, reflectOnTask, type ControlIntent, type Plan } from './Planner';
+import { toolsForCapability, Planner, reflectOnTask, type ControlIntent, type Plan } from './Planner';
 import { Clarifier, type ClarifyingQuestion } from './Clarifier';
 import { ActivityLog } from './ActivityLog';
 import { TaskEngine } from '../tasks/TaskEngine';
@@ -18,6 +18,10 @@ import { AnalysisTool } from '../tools/AnalysisTool';
 import { BrowserTool } from '../tools/BrowserTool';
 import { WatcherTool } from '../tools/WatcherTool';
 import { FileTool } from '../tools/FileTool';
+import { CalendarTool } from '../tools/CalendarTool';
+import { NotesTool } from '../tools/NotesTool';
+import { MailTool } from '../tools/MailTool';
+import { MailReadTool } from '../tools/MailReadTool';
 import { NotifyTool } from '../tools/NotifyTool';
 import { BrowserManager, ProfileInUseError } from '../browser/BrowserManager';
 import { EvidenceStore } from '../evidence/EvidenceStore';
@@ -122,7 +126,7 @@ export class NexaAgent extends EventEmitter {
     this.evidence = new EvidenceStore();
     this.notifications = new NotificationManager(config.notifications);
     this.llm = createLlmProvider(config);
-    this.planner = new Planner(this.llm);
+    this.planner = new Planner(this.llm, (reason) => this.reportModelFailure(reason));
     this.clarifier = new Clarifier(this.llm);
 
     this.watchers = new WatcherEngine(this.browser, this.notifications, this.activity, {
@@ -153,6 +157,33 @@ export class NexaAgent extends EventEmitter {
     this.activity.onEntry((entry) => this.emit('activity', entry));
   }
 
+  /**
+   * Accounts the clarifier may ask about.
+   *
+   * Empty whenever there is nothing to ask: mail switched off, a default
+   * already chosen, or only one account to choose from.
+   */
+  private mailAccountsToAsk(): string[] {
+    const mail = this.config.mail;
+    if (!mail.enabled || mail.defaultAccount) return [];
+    return mail.accounts;
+  }
+
+  /**
+   * Surfaces a model failure once, rather than on every request.
+   *
+   * A broken provider fails identically every time; repeating it would bury
+   * the activity log under the same line.
+   */
+  private reportModelFailure(reason: string): void {
+    const short = reason.slice(0, 160).replace(/\s+/g, ' ');
+    if (short === this.lastModelFailure) return;
+    this.lastModelFailure = short;
+    this.activity.add(`AI provider rejected the request, planning with rules instead: ${short}`, 'warn');
+  }
+
+  private lastModelFailure: string | null = null;
+
   private registerTools(): void {
     const demoMode = (): boolean => this.config.agent.demoMode;
 
@@ -171,6 +202,10 @@ export class NexaAgent extends EventEmitter {
       }),
     );
     this.tools.register(new FileTool(() => this.config.files));
+    this.tools.register(new CalendarTool(() => this.config.calendar));
+    this.tools.register(new NotesTool(() => this.config.notes));
+    this.tools.register(new MailTool(() => this.config.mail));
+    this.tools.register(new MailReadTool(() => this.config.mail));
     this.tools.register(new NotifyTool(this.notifications, this.llm));
   }
 
@@ -329,7 +364,7 @@ export class NexaAgent extends EventEmitter {
     // Control phrases are never vague enough to need clarifying.
     const control = this.planner.detectControl(text);
     if (!control) {
-      const clarity = await this.clarifier.assess(text, this.config.userProfile);
+      const clarity = await this.clarifier.assess(text, this.config.userProfile, this.mailAccountsToAsk());
       if (!clarity.clear && clarity.questions.length > 0) {
         return this.openClarification(askerKey, text, clarity.questions, clarity.interpretation, source, chatId);
       }
@@ -447,7 +482,7 @@ export class NexaAgent extends EventEmitter {
 
     // One more check, but never an endless interrogation.
     if (session.rounds < MAX_CLARIFY_ROUNDS) {
-      const clarity = await this.clarifier.assess(merged, this.config.userProfile);
+      const clarity = await this.clarifier.assess(merged, this.config.userProfile, this.mailAccountsToAsk());
       if (!clarity.clear && clarity.questions.length > 0) {
         const key = chatId ?? source;
         this.clarifications.set(key, { ...session, originalRequest: merged, rounds: session.rounds });
@@ -494,20 +529,68 @@ export class NexaAgent extends EventEmitter {
       'social posting': 'I cannot post to social accounts.',
       'form submission': 'I will not submit applications or forms for you.',
       'writing files': 'I can read files in folders you allow, but I do not create, edit or delete them.',
+      notes: 'I have no access to your notes, so I cannot save anything there.',
+      'reading mail': 'I cannot open your inbox, so I do not know what has arrived. Searching the web for it would tell you nothing.',
     };
 
+    // Reaching here with a tool registered means planning failed, not that the
+    // capability is missing. Saying "I have no calendar access" would be a lie,
+    // and would send the user looking for a setting that is already on.
+    const enabling = toolsForCapability(capability, this.tools);
+    const opening =
+      enabling.length > 0
+        ? `I could not turn that into a ${capability} step, so I have not done anything. ` +
+          `I do have ${enabling.length === 1 ? 'a tool for it' : 'tools for it'} ` +
+          `(${enabling.join(', ')}). ${RETRY_HINTS[capability] ?? 'Try again, more specifically.'}`
+        : `I cannot do that. ${alternatives[capability] ?? `I have no tool for ${capability}.`}`;
+
     return [
-      `I cannot do that. ${alternatives[capability] ?? `I have no tool for ${capability}.`}`,
+      opening,
       '',
       'What I can do:',
-      '- research something and report back',
-      '- watch a page or search and tell you when it meaningfully changes',
-      '- run a browser workflow and collect what it finds',
-      '- read files in folders you have allowed',
-      '- repeat any of those on a schedule',
+      ...this.describeCapabilities().map((line) => `- ${line}`),
       '',
       'If you want the information rather than the action, ask me to research it.',
     ].join('\n');
+  }
+
+  /**
+   * The "what I can do" list, built from what is actually registered.
+   *
+   * Hardcoding it meant every tool added -- built in or borrowed over MCP --
+   * left Nexa describing itself as it was months ago. The built-ins get hand
+   * written lines because "web_research: Search the web" reads like a manual;
+   * anything else falls back to its own description.
+   */
+  private describeCapabilities(): string[] {
+    const written: Record<string, string> = {
+      web_research: 'research something and report back',
+      watcher: 'watch a page or search and tell you when it meaningfully changes',
+      browser: 'run a browser workflow and collect what it finds',
+      files: 'read files in folders you have allowed',
+      notes: this.config.notes.enabled
+        ? 'save notes to your Notes app'
+        : 'save notes to your Notes app, once you have turned that on under Settings',
+      mail_read: this.config.mail.enabled
+        ? 'check your inbox and tell you what has arrived'
+        : '',
+      mail: this.config.mail.enabled
+        ? `write email${this.config.mail.allowSend ? ' and send it' : ' as a draft for you to send'}`
+        : 'write email, once you have turned that on under Settings',
+      calendar: this.config.calendar.enabled
+        ? 'put events in your calendar'
+        : 'put events in your calendar, once you have turned that on under Settings',
+      analyze: '',
+      notify: '',
+    };
+
+    const lines = this.tools.list().map((tool) => {
+      const line = written[tool.name];
+      if (line !== undefined) return line;
+      return `${tool.name}: ${firstSentence(tool.description)}`;
+    });
+
+    return [...lines.filter(Boolean), 'repeat any of those on a schedule'];
   }
 
   private handleControl(control: ControlIntent): AgentResponse {
@@ -724,3 +807,24 @@ const HELP_TEXT = [
 ].join('\n');
 
 export { HELP_TEXT };
+
+/**
+ * What to try instead, per capability.
+ *
+ * A generic "try again" is useless, and the advice differs: a calendar step
+ * fails for want of a time, while an inbox request fails for want of a window.
+ */
+const RETRY_HINTS: Record<string, string> = {
+  calendar: 'Try again with the exact date and time.',
+  notes: 'Try again saying what the note should be called and what goes in it.',
+  messaging: 'Try again with the recipient address and what you want it to say.',
+  'reading mail': 'Try again saying how far back to look, for example "unread mail from today".',
+  'writing files': 'Try again naming the file and what should go in it.',
+};
+
+/** First sentence of a tool description, for the capability list. */
+function firstSentence(description: string): string {
+  const stripped = description.replace(/\s*Input:.*$/s, '').trim();
+  const end = stripped.search(/\.(\s|$)/);
+  return (end === -1 ? stripped : stripped.slice(0, end)).trim();
+}

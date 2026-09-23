@@ -30,6 +30,30 @@ export interface ClarityAssessment {
   interpretation: string;
 }
 
+/** Anything to do with the user's mail, read or written. */
+const ABOUT_MAIL = /\b(mail|mails|e-?mails?|inbox|mailbox)\b/;
+
+/**
+ * Whether the request already points at one account.
+ *
+ * Matches loosely on purpose: "check my outlook" should resolve against an
+ * account called "you@outlook.com" without the user typing the
+ * whole address.
+ */
+export function namesAnAccount(lower: string, accounts: string[]): boolean {
+  return accounts.some((account) => {
+    const full = account.toLowerCase();
+    if (lower.includes(full)) return true;
+    return full
+      .split(/[@.\s_-]+/)
+      .filter((part) => part.length >= 4 && !GENERIC_ACCOUNT_WORDS.has(part))
+      .some((part) => new RegExp(`\\b${part}\\b`).test(lower));
+  });
+}
+
+/** Parts of an address that identify a provider, not an account. */
+const GENERIC_ACCOUNT_WORDS = new Set(['mail', 'email', 'inbox', 'com', 'net', 'org', 'co', 'uk']);
+
 /** Phrases that mean "stop asking and go". */
 const IMPATIENCE = /\b(just do it|go ahead|whatever|you decide|your call|any(thing)? is fine|don'?t ask|surprise me)\b/i;
 
@@ -41,7 +65,7 @@ export class Clarifier {
    *
    * These catch the common shapes cheaply and work with no provider at all.
    */
-  assessWithRules(request: string, profile: UserProfile): ClarityAssessment {
+  assessWithRules(request: string, profile: UserProfile, mailAccounts: string[] = []): ClarityAssessment {
     const text = request.trim();
     const lower = text.toLowerCase();
     const words = text.split(/\s+/).filter(Boolean);
@@ -85,9 +109,27 @@ export class Clarifier {
       });
     }
 
+    // Mail, with more than one account and nothing saying which.
+    //
+    // This is the question worth asking: four inboxes answer "what came in
+    // today" four different ways, and reading the wrong one looks exactly like
+    // a working answer. Only reached when no default account is configured --
+    // the agent passes an empty list once one is set.
+    if (mailAccounts.length > 1 && ABOUT_MAIL.test(lower) && !namesAnAccount(lower, mailAccounts)) {
+      questions.push({
+        id: 'mail_account',
+        question: 'Which mail account?',
+        why: `You have ${mailAccounts.length} set up, and they hold different mail.`,
+        suggestions: [...mailAccounts.slice(0, 4), 'all of them'],
+      });
+    }
+
     // A bare instruction with no object: "research", "find something".
+    // "check my mail" is three words and a verb, but it is not vague: it names
+    // a thing Nexa can actually open. Asking "what should I look into" there
+    // reads as Nexa not knowing its own capabilities.
     const bareVerb = /^(research|find|search|look|check|get|analyse|analyze|summari[sz]e)\b/.test(lower);
-    if (bareVerb && words.length <= 3) {
+    if (bareVerb && words.length <= 3 && !ABOUT_MAIL.test(lower)) {
       questions.push({
         id: 'topic',
         question: 'What should I look into, specifically?',
@@ -121,8 +163,12 @@ export class Clarifier {
    * Only consulted when the rules found nothing, so a clearly-specified request
    * never pays for an extra round trip.
    */
-  async assess(request: string, profile: UserProfile): Promise<ClarityAssessment> {
-    const rules = this.assessWithRules(request, profile);
+  async assess(
+    request: string,
+    profile: UserProfile,
+    mailAccounts: string[] = [],
+  ): Promise<ClarityAssessment> {
+    const rules = this.assessWithRules(request, profile, mailAccounts);
     if (!rules.clear || !this.llm.available) return rules;
     if (IMPATIENCE.test(request)) return rules;
 

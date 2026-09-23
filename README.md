@@ -437,14 +437,44 @@ over-eager request is raised to it rather than accepted.
 
 ## Security
 
+Nexa holds credentials that can spend money and read your mail, and it drives
+apps that hold everything else.
+
+**Secrets are encrypted at rest.** The API key and Telegram token are stored
+through the OS keychain (Electron's `safeStorage`), so the file on disk is
+ciphertext rather than readable text. `npm run doctor` reports which mode is
+active. The CLI entry points run outside Electron and have no keychain, so
+they fall back to a `0600` plaintext file; a hand-written `.env` keeps working
+and is still read first. Secrets are never echoed back to the UI.
+
+**The app is signed** with a Developer ID certificate and runs under the
+hardened runtime. The entitlement that matters is
+`com.apple.security.automation.apple-events`: without it the hardened runtime
+blocks the calendar, notes and mail tools while leaving everything else
+working, which is a confusing way to fail. Notarization is a separate step:
+
+```
+xcrun notarytool store-credentials notarytool \
+  --apple-id you@example.com --team-id YOURTEAMID --password <app-specific-password>
+```
+
+Then set `"notarize": true` under `build.mac`. Until that is done the app is
+signed but not notarized, so a first launch on another Mac needs
+right-click > Open.
+
+The rest:
+
 - Telegram is restricted to your chat id; anything else is refused and logged.
-- Secrets are environment-only, written `chmod 600`, never echoed to the UI.
 - The logger redacts passwords, tokens, cookies, API keys and OTPs at every
   nesting level; URLs are logged with query strings stripped.
 - The file tool refuses any path outside your allowed folders, traversal
   included, and declines binary formats rather than returning garbage.
-- Tasks carry explicit permissions; a tool needing more is refused.
-- Mutating steps require approval when `requireApprovalForWrites` is on.
+- Tasks carry explicit permissions; a tool needing more is refused. Reading
+  mail and writing mail are separate grants.
+- Mutating steps require approval when `requireApprovalForWrites` is on, and
+  sending mail needs a second switch beyond that.
+- Values reach AppleScript as `argv`, never spliced into the script text, so
+  no subject line or note body can change what a script does.
 - The renderer runs with context isolation, no Node integration, and a strict
   CSP (`default-src 'none'`). Its only capability is the IPC surface in
   `src/main/preload.ts`, and evidence files open only from Nexa's own directory.

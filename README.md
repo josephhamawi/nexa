@@ -1,10 +1,23 @@
+<div align="center">
+
+<img src="build/icon.png" width="104" alt="Nexa">
+
 # Nexa
 
-**Your AI operations agent.** Tell Nexa what you need, and it researches, monitors
-websites, runs browser workflows, manages recurring tasks, analyses what it finds,
-and reports back through the desktop app and Telegram.
+**Your AI operations agent.** Tell Nexa what you need, and it researches,
+monitors websites, runs browser workflows, manages recurring tasks, reads your
+mail and calendar, drives other apps, and reports back.
 
 Nexa is not a chat window. It plans, acts, verifies and reports.
+
+[Getting started](docs/GETTING-STARTED.md) ·
+[Security](#security) ·
+[Adding a tool](#making-nexa-do-a-new-thing) ·
+[hello@kodefoundry.com](mailto:hello@kodefoundry.com)
+
+![Nexa](docs/screenshots/01-overview.png)
+
+</div>
 
 ```
 You:   Find 5 remote AI engineering jobs that match my profile.
@@ -15,6 +28,8 @@ Nexa:  Task created: remote AI engineering jobs
        3. Send the shortlist
        I will report back when it is done.
 ```
+
+macOS · runs entirely on your machine · MIT licensed
 
 ---
 
@@ -550,3 +565,17 @@ multiple concurrent tasks, more watcher types, a daily briefing digest.
 **Later**: the architecture is deliberately local-first, but the layering
 (agent → engines → tools) is designed so execution could move to a remote
 worker, with multiple users and shared workflows, without rewriting the core.
+
+---
+
+## Contact
+
+- **Bugs and features** — [GitHub issues](https://github.com/josephhamawi/nexa/issues)
+- **Everything else, including security reports** — hello@kodefoundry.com
+
+Please report security issues by email rather than in a public issue.
+
+---
+
+Built by [Kode Foundry](mailto:hello@kodefoundry.com). MIT licensed — see
+[LICENSE](LICENSE).

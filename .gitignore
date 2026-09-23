@@ -8,6 +8,11 @@ config.json
 # Runtime data: browser profiles with live sessions, evidence, logs, state.
 data/
 
+# Stray compiled output. tsc writing next to the source leaves these at the
+# repo root, where they shadow the real modules and confuse a fresh clone.
+/*.js
+!eslint.config.js
+
 # Build output and installers.
 node_modules/
 dist/

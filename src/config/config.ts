@@ -98,6 +98,18 @@ export function ensureDataDirs(): void {
 
 let cachedEnv: Env | null = null;
 
+/**
+ * Owner-only, for everything Nexa writes.
+ *
+ * The parent directory is already 0700, which keeps other accounts out. These
+ * modes matter for what escapes it: a Time Machine restore, a folder synced to
+ * cloud storage, a support bundle someone zips up. Mail subjects, screenshots
+ * of login pages and a browser profile with live cookies should not become
+ * world-readable the moment they are copied.
+ */
+export const OWNER_ONLY_FILE = 0o600;
+export const OWNER_ONLY_DIR = 0o700;
+
 export function loadEnv(): Env {
   if (cachedEnv) return cachedEnv;
 
@@ -149,6 +161,7 @@ export function loadConfig(force = false): AppConfig {
   if (!fs.existsSync(paths.config) && fs.existsSync(paths.configExample)) {
     try {
       fs.copyFileSync(paths.configExample, paths.config);
+      fs.chmodSync(paths.config, OWNER_ONLY_FILE);
     } catch {
       // Not fatal: every field in the schema has a default.
     }
@@ -175,7 +188,10 @@ export function loadConfig(force = false): AppConfig {
 export function saveConfig(next: AppConfig): AppConfig {
   const parsed = AppConfigSchema.parse(next);
   ensureDataDirs();
-  fs.writeFileSync(paths.config, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(paths.config, `${JSON.stringify(parsed, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: OWNER_ONLY_FILE,
+  });
   cachedConfig = parsed;
   return parsed;
 }

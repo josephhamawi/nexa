@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createSecretStore, parseEnv } from '../src/config/secretStore';
+import { JsonStore } from '../src/storage/JsonStore';
 
 const dirs: string[] = [];
 function scratch(): string {
@@ -55,5 +56,20 @@ describe('env parsing', () => {
       B: 'two',
       D: 'three',
     });
+  });
+});
+
+describe('data at rest', () => {
+  it('writes owner-only, so a copied folder does not leak', () => {
+    // The parent directory is 0700, which keeps other accounts out. These
+    // modes matter for what escapes it: a Time Machine restore, a synced
+    // folder, a support bundle. Mail subjects and login screenshots should
+    // not become world-readable the moment they are copied out.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexa-modes-'));
+    const store = new JsonStore<{ id: string }>(path.join(dir, 'tasks.json'));
+    store.insert({ id: 'one' });
+
+    expect(fs.statSync(path.join(dir, 'tasks.json')).mode & 0o777).toBe(0o600);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import pino, { type Logger } from 'pino';
-import { ensureDataDirs, loadEnv, paths } from '../config/config';
+import { ensureDataDirs, loadEnv, paths , OWNER_ONLY_FILE } from '../config/config';
 
 /**
  * Keys that must never reach a log file or the console. Pino's redact option
@@ -51,7 +51,8 @@ function buildLogger(): Logger {
   ensureDataDirs();
 
   const logFile = path.join(paths.logs, 'nexa.log');
-  const fileStream = fs.createWriteStream(logFile, { flags: 'a' });
+  // Logs carry redacted records, but also URLs, task names and mail subjects.
+  const fileStream = fs.createWriteStream(logFile, { flags: 'a', mode: OWNER_ONLY_FILE });
 
   const streams: pino.StreamEntry[] = [
     { level: env.LOG_LEVEL, stream: fileStream },

@@ -12,6 +12,7 @@ import {
   loadConfig,
   loadEnv,
   paths,
+  secretsEncrypted,
 } from '../config/config';
 import { NotificationManager } from '../notifications/NotificationManager';
 import { createLlmProvider } from '../llm/providers';
@@ -115,6 +116,14 @@ async function main(): Promise<void> {
     enabledServers.length > 0
       ? `${enabledServers.length} enabled: ${enabledServers.map((server) => server.id).join(', ')}`
       : `none enabled (${config.mcpServers.length} in the catalogue)`,
+  );
+
+  line(
+    'Secrets at rest',
+    secretsEncrypted() ? OK : WARN,
+    secretsEncrypted()
+      ? 'encrypted with the OS keychain'
+      : `plaintext in ${paths.env} (owner-only). The desktop app encrypts them; this CLI cannot.`,
   );
 
   line('Demo mode', config.agent.demoMode ? WARN : OK, config.agent.demoMode ? 'ON, results are simulated' : 'off');

@@ -4,7 +4,8 @@
     "model": "claude-sonnet-5",
     "maxOutputTokens": 4096,
     "temperature": 0.2,
-    "baseUrl": ""
+    "baseUrl": "",
+    "effort": "medium"
   },
   "telegram": {
     "enabled": true,
@@ -21,6 +22,10 @@
   "files": {
     "allowedDirectories": [],
     "maxFileSizeMb": 25
+  },
+  "calendar": {
+    "enabled": false,
+    "defaultCalendar": ""
   },
   "notifications": {
     "telegram": true,
@@ -51,5 +56,105 @@
       "createdAt": "2026-01-01T00:00:00.000Z",
       "lastUsed": null
     }
-  ]
+  ],
+  "mcpServers": [
+    {
+      "id": "filesystem",
+      "name": "Files (read and write)",
+      "enabled": false,
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/you/Documents"
+      ],
+      "env": {},
+      "permissions": [
+        "FILES"
+      ],
+      "timeoutSeconds": 45,
+      "note": "Official. Replace the path with a folder you want Nexa to write in. Nexa's built-in file tool only reads; this adds writing."
+    },
+    {
+      "id": "memory",
+      "name": "Memory",
+      "enabled": false,
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "env": {},
+      "permissions": [
+        "READ"
+      ],
+      "timeoutSeconds": 45,
+      "note": "Official. A knowledge graph Nexa can write facts into and read back across tasks."
+    },
+    {
+      "id": "gmail",
+      "name": "Gmail",
+      "enabled": false,
+      "command": "npx",
+      "args": [
+        "-y",
+        "REPLACE-WITH-A-SERVER-YOU-TRUST"
+      ],
+      "env": {
+        "GOOGLE_OAUTH_CREDENTIALS": ""
+      },
+      "permissions": [
+        "MAIL"
+      ],
+      "timeoutSeconds": 45,
+      "note": "No official Gmail MCP server exists. Pick a community one you have read the source of, or skip this: the built-in mail tool already reaches a Gmail account set up in the macOS Mail app."
+    },
+    {
+      "id": "outlook",
+      "name": "Outlook",
+      "enabled": false,
+      "command": "npx",
+      "args": [
+        "-y",
+        "REPLACE-WITH-A-SERVER-YOU-TRUST"
+      ],
+      "env": {
+        "MS_GRAPH_CLIENT_ID": "",
+        "MS_GRAPH_CLIENT_SECRET": ""
+      },
+      "permissions": [
+        "MAIL"
+      ],
+      "timeoutSeconds": 45,
+      "note": "No official Outlook MCP server exists. Same as Gmail: an Outlook account configured in the macOS Mail app works through the built-in mail tool with no server at all."
+    },
+    {
+      "id": "google_calendar",
+      "name": "Google Calendar",
+      "enabled": false,
+      "command": "npx",
+      "args": [
+        "-y",
+        "REPLACE-WITH-A-SERVER-YOU-TRUST"
+      ],
+      "env": {
+        "GOOGLE_OAUTH_CREDENTIALS": ""
+      },
+      "permissions": [
+        "CALENDAR"
+      ],
+      "timeoutSeconds": 45,
+      "note": "Only needed for a Google calendar Nexa cannot see. A Google account subscribed in the macOS Calendar app already works through the built-in calendar tool."
+    }
+  ],
+  "notes": {
+    "enabled": false,
+    "defaultFolder": "Notes"
+  },
+  "mail": {
+    "enabled": false,
+    "allowSend": false,
+    "defaultAccount": "",
+    "accounts": []
+  }
 }

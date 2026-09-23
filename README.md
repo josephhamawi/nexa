@@ -33,18 +33,6 @@ macOS · runs entirely on your machine · MIT licensed
 
 ---
 
-## See it work
-
-| | |
-|---|---|
-| **Everything at a glance.** What is running, what needs you, what changed | ![Overview](docs/screenshots/01-overview.png) |
-| **Every result, in full**, with the evidence and a confidence score | ![A result](docs/screenshots/03-result.png) |
-| **Watchers.** Pages and searches checked on a schedule, reporting only meaningful change | ![Watchers](docs/screenshots/04-watchers.png) |
-| **Nothing consequential without you.** Anything that changes the world outside Nexa waits | ![Approvals](docs/screenshots/05-approvals.png) |
-| **Off until you say so.** Every capability, and the allow-lists that bound it | ![Settings](docs/screenshots/06-settings.png) |
-
----
-
 ## What it does
 
 - **Understands a request** in plain language, from the desktop app or Telegram.
@@ -66,6 +54,8 @@ macOS · runs entirely on your machine · MIT licensed
 - Send mail, unless you switch sending on yourself. It drafts by default and leaves
   the message in Drafts for you to read and send.
 - Claim something was done when it was not.
+
+![Asking Nexa for something in plain language](docs/screenshots/07-request.png)
 
 When a page needs a person, the task moves to `WAITING_FOR_HUMAN`, Nexa screenshots
 the state, messages you, and waits. You finish the step, press **Resume**, and it
@@ -443,6 +433,16 @@ floor. Nothing is hard-coded.
 
 ---
 
+Every task keeps its plan, its progress and its evidence.
+
+![Tasks, with their plan and progress](docs/screenshots/02-tasks.png)
+
+Open any result in full, with the confidence score that produced it.
+
+![A finished result](docs/screenshots/03-result.png)
+
+---
+
 ## Watcher examples
 
 A watcher stores a normalised snapshot and compares future readings against it.
@@ -462,10 +462,23 @@ over-eager request is raised to it rather than accepted.
 
 ---
 
+![Watchers, checked on a schedule](docs/screenshots/04-watchers.png)
+
+---
+
 ## Security
 
 Nexa holds credentials that can spend money and read your mail, and it drives
 apps that hold everything else.
+
+Anything that changes something outside Nexa waits for you.
+
+![Approvals](docs/screenshots/05-approvals.png)
+
+Every capability is off until you turn it on, and the lists bound what it can
+reach even then.
+
+![Settings](docs/screenshots/06-settings.png)
 
 **Secrets are encrypted at rest.** The API key and Telegram token are stored
 through the OS keychain (Electron's `safeStorage`), so the file on disk is

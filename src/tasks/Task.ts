@@ -56,6 +56,16 @@ export const Permission = {
   FILES: 'FILES',
   EXECUTE: 'EXECUTE',
   NOTIFY: 'NOTIFY',
+  /** Writes to the user's calendar. Separate from EXECUTE so a task that may
+   *  run a browser workflow cannot also book things. */
+  CALENDAR: 'CALENDAR',
+  /** Writes to the user's notes. */
+  NOTES: 'NOTES',
+  /** Composes mail as the user. The narrowest grant Nexa hands out. */
+  MAIL: 'MAIL',
+  /** Reads the user's inbox. Separate from MAIL so a task allowed to draft a
+   *  reply is not thereby allowed to read everything that ever arrived. */
+  MAIL_READ: 'MAIL_READ',
 } as const;
 
 export type Permission = (typeof Permission)[keyof typeof Permission];
@@ -80,6 +90,14 @@ export interface TaskStep {
   startedAt?: string | null;
   finishedAt?: string | null;
   output?: unknown;
+  /**
+   * The tool's own one-line account of what happened.
+   *
+   * Kept because the data alone loses the context: an empty result reads as a
+   * bug, while "No mail today in joseph@..." is an answer. Later steps and the
+   * result dialog both read this.
+   */
+  summary?: string | null;
   error?: string | null;
   attempts: number;
 }

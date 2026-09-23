@@ -109,6 +109,28 @@ async function main(): Promise<void> {
       : 'off, mail requests are declined',
   );
 
+  const shell = config.automation.shell;
+  line(
+    'Run commands',
+    shell.enabled ? (shell.allowedCommands.length > 0 ? OK : WARN) : OK,
+    shell.enabled
+      ? shell.allowedCommands.length > 0
+        ? `on, allowed: ${shell.allowedCommands.join(', ')}`
+        : 'on, but no commands are allowed so nothing can run'
+      : 'off',
+  );
+
+  const apps = config.automation.apps;
+  line(
+    'Control other apps',
+    apps.enabled ? (apps.allowedApps.length > 0 ? OK : WARN) : OK,
+    apps.enabled
+      ? apps.allowedApps.length > 0
+        ? `on, allowed: ${apps.allowedApps.join(', ')}`
+        : 'on, but no apps are allowed so nothing can be driven'
+      : 'off',
+  );
+
   const enabledServers = config.mcpServers.filter((server) => server.enabled);
   line(
     'MCP servers',

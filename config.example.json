@@ -156,5 +156,17 @@
     "allowSend": false,
     "defaultAccount": "",
     "accounts": []
+  },
+  "automation": {
+    "shell": {
+      "enabled": false,
+      "allowedCommands": [],
+      "workingDirectory": "",
+      "timeoutSeconds": 60
+    },
+    "apps": {
+      "enabled": false,
+      "allowedApps": []
+    }
   }
 }

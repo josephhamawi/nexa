@@ -538,6 +538,11 @@ function fillSettings(next) {
   $('f-approval').checked = Boolean(config.agent.requireApprovalForWrites);
   $('f-demo').checked = Boolean(config.agent.demoMode);
 
+  const automation = config.automation || { shell: {}, apps: {} };
+  $('f-shell-on').checked = Boolean(automation.shell && automation.shell.enabled);
+  $('f-shell-cmds').value = ((automation.shell && automation.shell.allowedCommands) || []).join(', ');
+  $('f-apps-on').checked = Boolean(automation.apps && automation.apps.enabled);
+  $('f-apps-list').value = ((automation.apps && automation.apps.allowedApps) || []).join(', ');
   $('f-notes-on').checked = Boolean(config.notes && config.notes.enabled);
   $('f-notes-folder').value = (config.notes && config.notes.defaultFolder) || 'Notes';
   $('f-mail-on').checked = Boolean(config.mail && config.mail.enabled);
@@ -603,6 +608,16 @@ function readSettings() {
     calendar: {
       enabled: $('f-calendar-on').checked,
       defaultCalendar: $('f-calendar-name').value.trim(),
+    },
+    automation: {
+      shell: {
+        enabled: $('f-shell-on').checked,
+        allowedCommands: list($('f-shell-cmds').value),
+      },
+      apps: {
+        enabled: $('f-apps-on').checked,
+        allowedApps: list($('f-apps-list').value),
+      },
     },
     notes: {
       enabled: $('f-notes-on').checked,

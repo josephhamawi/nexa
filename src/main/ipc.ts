@@ -150,6 +150,10 @@ export function registerIpc(
       calendar: { ...current.calendar, ...(incoming.calendar ?? {}) },
       notes: { ...current.notes, ...(incoming.notes ?? {}) },
       mail: { ...current.mail, ...(incoming.mail ?? {}) },
+      automation: {
+        shell: { ...current.automation.shell, ...((incoming.automation as Record<string, unknown>)?.shell ?? {}) },
+        apps: { ...current.automation.apps, ...((incoming.automation as Record<string, unknown>)?.apps ?? {}) },
+      },
       notifications: { ...current.notifications, ...(incoming.notifications ?? {}) },
       userProfile: { ...current.userProfile, ...(incoming.userProfile ?? {}) },
       mcpServers: incoming.mcpServers ?? current.mcpServers,

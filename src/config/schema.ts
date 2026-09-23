@@ -150,6 +150,37 @@ export const MailConfigSchema = z.object({
   accounts: z.array(z.string()).default([]),
 });
 
+/**
+ * Running commands and driving other apps.
+ *
+ * Both are off by default and both are allow-listed. Nexa reads email and web
+ * pages -- text an attacker can write -- so a tool that runs whatever it is
+ * handed is the difference between a bad summary and a compromised machine.
+ * The allow-list is the boundary; the approval prompt is the second one.
+ */
+export const ShellConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  /**
+   * Programs Nexa may run, by name. Empty means nothing runs, which is the
+   * point: this is opt-in per command, never "anything on PATH".
+   */
+  allowedCommands: z.array(z.string()).default([]),
+  /** Commands run here. Empty uses your home directory. */
+  workingDirectory: z.string().default(''),
+  timeoutSeconds: z.number().int().min(1).max(600).default(60),
+});
+
+export const AppControlConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** Apps Nexa may drive, by name as they appear in the Applications folder. */
+  allowedApps: z.array(z.string()).default([]),
+});
+
+export const AutomationConfigSchema = z.object({
+  shell: ShellConfigSchema.default({}),
+  apps: AppControlConfigSchema.default({}),
+});
+
 export const AppConfigSchema = z.object({
   llm: LlmConfigSchema.default({}),
   telegram: TelegramConfigSchema.default({}),
@@ -158,6 +189,7 @@ export const AppConfigSchema = z.object({
   calendar: CalendarConfigSchema.default({}),
   notes: NotesConfigSchema.default({}),
   mail: MailConfigSchema.default({}),
+  automation: AutomationConfigSchema.default({}),
   notifications: NotificationsConfigSchema.default({}),
   userProfile: UserProfileSchema.default({}),
   mcpServers: z.array(McpServerSchema).default([]),
@@ -184,6 +216,9 @@ export type FilesConfig = z.infer<typeof FilesConfigSchema>;
 export type CalendarConfig = z.infer<typeof CalendarConfigSchema>;
 export type NotesConfig = z.infer<typeof NotesConfigSchema>;
 export type MailConfig = z.infer<typeof MailConfigSchema>;
+export type ShellConfig = z.infer<typeof ShellConfigSchema>;
+export type AppControlConfig = z.infer<typeof AppControlConfigSchema>;
+export type AutomationConfig = z.infer<typeof AutomationConfigSchema>;
 export type NotificationsConfig = z.infer<typeof NotificationsConfigSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 

@@ -440,6 +440,36 @@
                 <span id="mail-status" class="form-status"></span>
               </fieldset>
               <fieldset class="field field-wide">
+                <span>Run commands</span>
+                <div class="checks">
+                  <label><input id="f-shell-on" type="checkbox" /> Let Nexa run commands I list</label>
+                </div>
+                <label class="field">
+                  <span>Allowed commands</span>
+                  <input id="f-shell-cmds" type="text" placeholder="git, ls, python3 (comma separated)" />
+                </label>
+                <small>
+                  Named programs only, never a shell: pipes, redirects and <code>&amp;&amp;</code> are refused, so
+                  one allowed command cannot chain another. Nexa asks before every run. Leave the list empty
+                  and nothing can run at all.
+                </small>
+              </fieldset>
+              <fieldset class="field field-wide">
+                <span>Control other apps</span>
+                <div class="checks">
+                  <label><input id="f-apps-on" type="checkbox" /> Let Nexa drive the apps I list</label>
+                </div>
+                <label class="field">
+                  <span>Allowed apps</span>
+                  <input id="f-apps-list" type="text" placeholder="Finder, Music, Safari (comma separated)" />
+                </label>
+                <small>
+                  The broadest thing Nexa can do, so it is the most limited: only these apps, one statement at
+                  a time, and anything that escapes the named app is refused. An app you allow can still do
+                  whatever that app can do, so list only ones you would hand over.
+                </small>
+              </fieldset>
+              <fieldset class="field field-wide">
                 <span>Folders Nexa may read</span>
                 <div id="folder-list" class="folder-list"></div>
                 <button type="button" id="add-folder" class="btn btn-quiet btn-sm">Add folder</button>

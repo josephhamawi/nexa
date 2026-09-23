@@ -22,6 +22,8 @@ import { CalendarTool } from '../tools/CalendarTool';
 import { NotesTool } from '../tools/NotesTool';
 import { MailTool } from '../tools/MailTool';
 import { MailReadTool } from '../tools/MailReadTool';
+import { ShellTool } from '../tools/ShellTool';
+import { AppControlTool } from '../tools/AppControlTool';
 import { NotifyTool } from '../tools/NotifyTool';
 import { BrowserManager, ProfileInUseError } from '../browser/BrowserManager';
 import { EvidenceStore } from '../evidence/EvidenceStore';
@@ -206,6 +208,8 @@ export class NexaAgent extends EventEmitter {
     this.tools.register(new NotesTool(() => this.config.notes));
     this.tools.register(new MailTool(() => this.config.mail));
     this.tools.register(new MailReadTool(() => this.config.mail));
+    this.tools.register(new ShellTool(() => this.config.automation.shell));
+    this.tools.register(new AppControlTool(() => this.config.automation.apps));
     this.tools.register(new NotifyTool(this.notifications, this.llm));
   }
 
@@ -571,6 +575,12 @@ export class NexaAgent extends EventEmitter {
       notes: this.config.notes.enabled
         ? 'save notes to your Notes app'
         : 'save notes to your Notes app, once you have turned that on under Settings',
+      shell: this.config.automation.shell.enabled
+        ? `run these commands for you: ${this.config.automation.shell.allowedCommands.join(', ') || 'none listed yet'}`
+        : '',
+      app_control: this.config.automation.apps.enabled
+        ? `drive these apps: ${this.config.automation.apps.allowedApps.join(', ') || 'none listed yet'}`
+        : '',
       mail_read: this.config.mail.enabled
         ? 'check your inbox and tell you what has arrived'
         : '',

@@ -97,7 +97,9 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "notarize": false
+      "notarize": {
+        "teamId": "C8J4Z79SX4"
+      }
     },
     "dmg": {
       "title": "Nexa"

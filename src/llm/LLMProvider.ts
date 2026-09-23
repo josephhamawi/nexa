@@ -25,6 +25,8 @@ export interface CompletionResult {
   /** Rough token accounting, when the provider reports it. */
   inputTokens?: number;
   outputTokens?: number;
+  /** Input tokens served from the prompt cache, at about a tenth the price. */
+  cachedInputTokens?: number;
 }
 
 export interface LlmProvider {

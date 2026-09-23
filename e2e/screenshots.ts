@@ -82,13 +82,13 @@ function sampleTasks(): unknown[] {
       },
       result:
         '5 roles matched your profile.\n\n' +
-        '1. Senior AI Engineer — Anthropic\n' +
+        '1. Senior AI Engineer, Anthropic\n' +
         '   Remote (US) · posted 2 days ago\n' +
         '   Agentic systems, evals, tool use. Matches: TypeScript, distributed systems.\n\n' +
-        '2. Staff Engineer, Agents — Linear\n' +
+        '2. Staff Engineer (Agents), Linear\n' +
         '   Remote (EU) · posted 4 days ago\n' +
         '   Matches: TypeScript, product engineering.\n\n' +
-        '3. AI Platform Engineer — Vercel\n' +
+        '3. AI Platform Engineer, Vercel\n' +
         '   Remote · posted 1 day ago',
       steps: [
         step('web_research', 'Search for roles matching your profile', 'DONE', { findings: new Array(9).fill({}) }, '9 sources read'),
@@ -273,7 +273,7 @@ function scratchProfile(): { dir: string; env: NodeJS.ProcessEnv } {
     { at: minutesAgo(11), level: 'info', message: '5 relevant results identified' },
     { at: minutesAgo(12), level: 'info', message: '9 sources read' },
     { at: minutesAgo(3), level: 'warn', message: 'Approval needed: saving a note changes something outside Nexa' },
-    { at: minutesAgo(52), level: 'info', message: 'Checked anthropic.com/pricing — no meaningful change' },
+    { at: minutesAgo(52), level: 'info', message: 'Checked anthropic.com/pricing, no meaningful change' },
   ]
     .map((entry, i) => JSON.stringify({ id: `act-${i}`, ...entry }))
     .join('\n');

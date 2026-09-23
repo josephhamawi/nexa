@@ -29,7 +29,7 @@ const checks: Check[] = [];
 
 function record(name: string, ok: boolean, detail = ''): void {
   checks.push({ name, ok, detail });
-  console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? `: ${detail}` : ''}`);
 }
 
 async function shot(page: Page, name: string): Promise<void> {

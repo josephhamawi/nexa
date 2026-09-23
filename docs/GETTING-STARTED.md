@@ -79,7 +79,7 @@ Anything that changes something outside Nexa waits for you first.
 ![Approvals](screenshots/05-approvals.png)
 
 **It will also tell you when it cannot do something at all**, rather than
-quietly substituting a web search for the thing you asked for — which looks
+quietly substituting a web search for the thing you asked for, which looks
 exactly like it is working.
 
 ---
@@ -117,7 +117,7 @@ Telegram gives you Nexa from anywhere.
 
 1. Message **@BotFather**, send `/newbot`, copy the token.
 2. Paste it into **Settings → Telegram**.
-3. Open your new bot and press **Start** — a bot cannot message you first.
+3. Open your new bot and press **Start**. A bot cannot message you first.
 4. Press **Detect**, and Nexa reads your chat ID from the bot.
 
 Only your chat ID can command it. Anything else is refused and logged.
@@ -130,7 +130,7 @@ Only your chat ID can command it. Anything else is refused and logged.
 npm run doctor
 ```
 
-It reports the browser, the model (including whether a real call succeeds —
+It reports the browser, the model (including whether a real call succeeds:
 a key that is present but rejected looks identical to a working one from
 outside), Telegram, which capabilities are on, and whether secrets are
 encrypted.
@@ -153,7 +153,7 @@ To start completely fresh, quit Nexa and delete that folder.
 
 ## When something goes wrong
 
-**"model: rules only" but I added a key.** Run `npm run doctor` — it makes a
+**"model: rules only" but I added a key.** Run `npm run doctor`. It makes a
 real API call. A key that is present but rejected reports `ok` everywhere
 except there.
 

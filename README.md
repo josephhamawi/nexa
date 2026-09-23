@@ -37,11 +37,11 @@ macOS · runs entirely on your machine · MIT licensed
 
 | | |
 |---|---|
-| **Everything at a glance** — what is running, what needs you, what changed | ![Overview](docs/screenshots/01-overview.png) |
-| **Every result, in full** — with the evidence and a confidence score | ![A result](docs/screenshots/03-result.png) |
-| **Watchers** — pages and searches checked on a schedule, reporting only meaningful change | ![Watchers](docs/screenshots/04-watchers.png) |
-| **Nothing consequential without you** — anything that changes the world outside Nexa waits | ![Approvals](docs/screenshots/05-approvals.png) |
-| **Off until you say so** — every capability, and the allow-lists that bound it | ![Settings](docs/screenshots/06-settings.png) |
+| **Everything at a glance.** What is running, what needs you, what changed | ![Overview](docs/screenshots/01-overview.png) |
+| **Every result, in full**, with the evidence and a confidence score | ![A result](docs/screenshots/03-result.png) |
+| **Watchers.** Pages and searches checked on a schedule, reporting only meaningful change | ![Watchers](docs/screenshots/04-watchers.png) |
+| **Nothing consequential without you.** Anything that changes the world outside Nexa waits | ![Approvals](docs/screenshots/05-approvals.png) |
+| **Off until you say so.** Every capability, and the allow-lists that bound it | ![Settings](docs/screenshots/06-settings.png) |
 
 ---
 
@@ -514,9 +514,9 @@ Settings → Agent behaviour → Demo mode. Nexa plans and executes exactly as
 usual, but research and browser steps are simulated locally and **every result is
 labelled `[SIMULATED]`**. Nothing is contacted.
 
-It exists to demonstrate the whole flow — natural-language task creation,
+It exists to demonstrate the whole flow: natural-language task creation,
 planning, execution, analysis, notification, approval, takeover, history and
-evidence — without depending on the network. Simulated output is never presented
+evidence, without depending on the network. Simulated output is never presented
 as real.
 
 ---
@@ -582,12 +582,12 @@ worker, with multiple users and shared workflows, without rewriting the core.
 
 ## Contact
 
-- **Bugs and features** — [GitHub issues](https://github.com/josephhamawi/nexa/issues)
-- **Everything else, including security reports** — hello@kodefoundry.com
+- **Bugs and features**: [GitHub issues](https://github.com/josephhamawi/nexa/issues)
+- **Everything else, including security reports**: hello@kodefoundry.com
 
 Please report security issues by email rather than in a public issue.
 
 ---
 
-Built by [Kode Foundry](mailto:hello@kodefoundry.com). MIT licensed — see
+Built by [Kode Foundry](mailto:hello@kodefoundry.com). MIT licensed, see
 [LICENSE](LICENSE).
